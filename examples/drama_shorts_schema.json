@@ -1,0 +1,202 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Drama Shorts Metadata Schema",
+  "description": "Example schema for drama shorts video metadata - customize for your content type",
+  "type": "object",
+  "required": [
+    "id",
+    "title",
+    "duration_seconds",
+    "genre",
+    "content_type",
+    "created_at"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Unique identifier for the drama short"
+    },
+    "title": {
+      "type": "string",
+      "description": "Title of the drama short",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "description": {
+      "type": "string",
+      "description": "Brief description or synopsis",
+      "maxLength": 1000
+    },
+    "duration_seconds": {
+      "type": "integer",
+      "description": "Duration in seconds (60-180 for 1-3 minutes)",
+      "minimum": 60,
+      "maximum": 180
+    },
+    "genre": {
+      "type": "array",
+      "description": "Drama genres/subgenres",
+      "items": {
+        "type": "string",
+        "enum": [
+          "romantic_drama",
+          "psychological_thriller",
+          "family_drama",
+          "historical_drama",
+          "comedy_drama",
+          "teen_drama",
+          "crime_drama",
+          "social_drama",
+          "mystery_drama",
+          "workplace_drama"
+        ]
+      },
+      "minItems": 1,
+      "maxItems": 3
+    },
+    "content_type": {
+      "type": "string",
+      "description": "Type of content creation",
+      "enum": ["custom", "user_generated"]
+    },
+    "cast": {
+      "type": "array",
+      "description": "Main cast members",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {"type": "string"},
+          "role": {"type": "string"},
+          "character_name": {"type": "string"}
+        },
+        "required": ["name", "role"]
+      },
+      "maxItems": 10
+    },
+    "crew": {
+      "type": "object",
+      "description": "Key crew members",
+      "properties": {
+        "director": {"type": "string"},
+        "writer": {"type": "string"},
+        "producer": {"type": "string"},
+        "cinematographer": {"type": "string"}
+      }
+    },
+    "tags": {
+      "type": "array",
+      "description": "Searchable tags and keywords",
+      "items": {"type": "string"},
+      "maxItems": 20
+    },
+    "language": {
+      "type": "string",
+      "description": "Primary language",
+      "default": "en"
+    },
+    "rating": {
+      "type": "object",
+      "description": "Content rating information",
+      "properties": {
+        "mpaa_rating": {
+          "type": "string",
+          "enum": ["G", "PG", "PG-13", "R", "NC-17", "NR"]
+        },
+        "content_warnings": {
+          "type": "array",
+          "items": {"type": "string"}
+        }
+      }
+    },
+    "audience_metrics": {
+      "type": "object",
+      "description": "Audience engagement metrics",
+      "properties": {
+        "view_count": {"type": "integer", "minimum": 0},
+        "like_count": {"type": "integer", "minimum": 0},
+        "comment_count": {"type": "integer", "minimum": 0},
+        "share_count": {"type": "integer", "minimum": 0},
+        "average_rating": {"type": "number", "minimum": 0, "maximum": 5},
+        "completion_rate": {"type": "number", "minimum": 0, "maximum": 1}
+      }
+    },
+    "technical_specs": {
+      "type": "object",
+      "description": "Technical specifications",
+      "properties": {
+        "resolution": {
+          "type": "string",
+          "enum": ["720p", "1080p", "4K"]
+        },
+        "aspect_ratio": {
+          "type": "string",
+          "enum": ["16:9", "9:16", "1:1", "4:3"]
+        },
+        "frame_rate": {"type": "integer"},
+        "file_size_mb": {"type": "number", "minimum": 0}
+      }
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Creation timestamp"
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Last update timestamp"
+    },
+    "published_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Publication timestamp"
+    },
+    "creator_info": {
+      "type": "object",
+      "description": "Information about the content creator",
+      "properties": {
+        "creator_id": {"type": "string"},
+        "creator_name": {"type": "string"},
+        "creator_type": {
+          "type": "string",
+          "enum": ["individual", "production_company", "studio"]
+        },
+        "verified": {"type": "boolean"}
+      }
+    },
+    "location": {
+      "type": "object",
+      "description": "Filming location information",
+      "properties": {
+        "country": {"type": "string"},
+        "city": {"type": "string"},
+        "setting": {
+          "type": "string",
+          "enum": ["urban", "suburban", "rural", "indoor", "outdoor", "studio"]
+        }
+      }
+    },
+    "themes": {
+      "type": "array",
+      "description": "Thematic elements",
+      "items": {
+        "type": "string",
+        "enum": [
+          "love_romance",
+          "family_relationships",
+          "friendship",
+          "betrayal",
+          "redemption",
+          "coming_of_age",
+          "identity",
+          "social_issues",
+          "mental_health",
+          "career_ambition",
+          "loss_grief",
+          "humor_comedy",
+          "suspense_mystery"
+        ]
+      }
+    }
+  }
+}

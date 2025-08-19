@@ -1,0 +1,22 @@
+{
+  "vertex_ai": {
+    "project_id": "your-gcp-project-id",
+    "location": "global",
+    "data_store_id": "drama-shorts-datastore",
+    "engine_id": "drama-shorts-engine",
+    "serving_config_id": "default_config"
+  },
+  "schema": {
+    "schema_file": "examples/drama_shorts_schema.json",
+    "id_field": "id",
+    "title_field": "title",
+    "content_field": "description",
+    "searchable_fields": ["title", "description", "tags", "cast", "themes"],
+    "filterable_fields": ["genre", "content_type", "language", "rating.mpaa_rating", "duration_seconds"],
+    "facetable_fields": ["genre", "content_type", "language", "creator_info.creator_type"]
+  },
+  "data_directory": "data",
+  "output_directory": "output",
+  "batch_size": 100,
+  "max_workers": 4
+}

@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vertexai-search-media"
+version = "0.1.0"
+description = "Vertex AI Search for Media - Schema-agnostic search and recommendation CLI"
+authors = [{name = "Drama Shorts Startup"}]
+license = {text = "MIT"}
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = [
+    "google-cloud-discoveryengine>=0.11.0",
+    "google-cloud-storage>=2.10.0",
+    "click>=8.1.0",
+    "pydantic>=2.0.0",
+    "jsonschema>=4.19.0",
+    "python-dotenv>=1.0.0",
+    "rich>=13.0.0"
+]
+
+[project.scripts]
+vertex-search = "vertex_search.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["vertex_search*"]
