@@ -5,7 +5,6 @@ __pycache__/
 
 .env*
 my_config.json
-sample_data.json
 output/
 
 # C extensions
