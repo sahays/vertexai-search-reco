@@ -7,6 +7,7 @@ from typing import Dict, Any, List, Optional
 import jsonschema
 from google.cloud import discoveryengine_v1beta
 from google.cloud import storage
+import uuid
 
 from .config import ConfigManager
 from .interfaces import (
@@ -126,6 +127,12 @@ class MediaAssetManager(MediaAssetManagerInterface):
         self.document_client = discoveryengine_v1beta.DocumentServiceClient(**client_kwargs)
         self.import_client = discoveryengine_v1beta.DocumentServiceClient(**client_kwargs)
         
+        # Initialize Cloud Storage client
+        storage_kwargs = {}
+        if credentials is not None:
+            storage_kwargs["credentials"] = credentials
+        self.storage_client = storage.Client(**storage_kwargs)
+        
     @handle_vertex_ai_error
     def create_data_store(self, data_store_id: str, display_name: str) -> bool:
         """Create a new data store in Vertex AI."""
@@ -148,7 +155,7 @@ class MediaAssetManager(MediaAssetManagerInterface):
                 display_name=display_name,
                 industry_vertical=industry_vertical,
                 solution_types=[discoveryengine_v1beta.SolutionType.SOLUTION_TYPE_SEARCH],
-                content_config=discoveryengine_v1beta.DataStore.ContentConfig.CONTENT_REQUIRED
+                content_config=discoveryengine_v1beta.DataStore.ContentConfig.NO_CONTENT
             )
             
             operation = self.client.create_data_store(
@@ -244,6 +251,138 @@ class MediaAssetManager(MediaAssetManagerInterface):
             logger.error(f"Failed to get import status: {str(e)}")
             return {"done": False, "error": str(e)}
     
+    def list_documents(self, data_store_id: str, page_size: int = 10) -> Dict[str, Any]:
+        """List documents in a data store to verify import."""
+        try:
+            parent = f"projects/{self.config_manager.vertex_ai.project_id}/locations/{self.config_manager.vertex_ai.location}/collections/default_collection/dataStores/{data_store_id}/branches/default_branch"
+            
+            request = discoveryengine_v1beta.ListDocumentsRequest(
+                parent=parent,
+                page_size=page_size
+            )
+            
+            response = self.document_client.list_documents(request=request)
+            
+            documents = []
+            for doc in response.documents:
+                doc_info = {
+                    'id': doc.id,
+                    'name': doc.name
+                }
+                documents.append(doc_info)
+            
+            return {
+                'documents': documents,
+                'count': len(documents),
+                'next_page_token': response.next_page_token
+            }
+            
+        except Exception as e:
+            logger.error(f"Failed to list documents: {str(e)}")
+            return {'error': str(e), 'documents': [], 'count': 0}
+    
+    def upload_to_cloud_storage(self, bucket_name: str, documents: List[Dict[str, Any]], folder_path: str = "", batch_size: int = 1000) -> List[str]:
+        """Upload documents to Cloud Storage as JSONL files for Vertex AI import. Returns list of GCS URIs."""
+        try:
+            bucket = self.storage_client.bucket(bucket_name)
+            uploaded_uris = []
+            id_field = self.config_manager.schema.id_field
+            
+            logger.info(f"Uploading {len(documents)} documents to gs://{bucket_name}/{folder_path} as JSONL files")
+            
+            # Process documents in batches and create JSONL files
+            for batch_start in range(0, len(documents), batch_size):
+                batch_end = min(batch_start + batch_size, len(documents))
+                batch_documents = documents[batch_start:batch_end]
+                
+                # Create batch filename
+                batch_id = f"batch_{batch_start//batch_size + 1:04d}"
+                blob_path = f"{folder_path}/{batch_id}.jsonl" if folder_path else f"{batch_id}.jsonl"
+                blob = bucket.blob(blob_path)
+                
+                # Create JSONL content (one JSON object per line) with proper Document schema
+                jsonl_lines = []
+                for doc in batch_documents:
+                    # Ensure document has required ID
+                    doc_id = str(doc.get(id_field, str(uuid.uuid4())))
+                    # Create a copy of the document with guaranteed ID
+                    doc_with_id = doc.copy()
+                    doc_with_id[id_field] = doc_id
+                    
+                    # Wrap document in proper Vertex AI Document schema format
+                    vertex_doc = {
+                        "id": doc_id,
+                        "structData": doc_with_id
+                    }
+                    
+                    # Add document as single line JSON (no indentation)
+                    jsonl_lines.append(json.dumps(vertex_doc, default=str))
+                
+                # Join with newlines to create JSONL format
+                jsonl_content = '\n'.join(jsonl_lines)
+                
+                # Upload JSONL file
+                blob.upload_from_string(jsonl_content, content_type='application/json')
+                
+                uri = f"gs://{bucket_name}/{blob_path}"
+                uploaded_uris.append(uri)
+                
+                logger.info(f"Uploaded batch {batch_start//batch_size + 1}: {len(batch_documents)} documents to {blob_path}")
+            
+            logger.info(f"Successfully uploaded {len(documents)} documents in {len(uploaded_uris)} JSONL files")
+            return uploaded_uris
+            
+        except Exception as e:
+            logger.error(f"Failed to upload to Cloud Storage: {str(e)}")
+            raise DataStoreError(f"Failed to upload to Cloud Storage: {str(e)}") from e
+    
+    @handle_vertex_ai_error  
+    def import_from_cloud_storage(self, data_store_id: str, gcs_uri: str, data_schema: str = "document") -> str:
+        """Import documents from Cloud Storage. Returns operation ID."""
+        try:
+            parent = f"projects/{self.config_manager.vertex_ai.project_id}/locations/{self.config_manager.vertex_ai.location}/collections/default_collection/dataStores/{data_store_id}/branches/default_branch"
+            
+            # Create GCS source
+            gcs_source = discoveryengine_v1beta.GcsSource(
+                input_uris=[gcs_uri],
+                data_schema=data_schema
+            )
+            
+            # Create import request with GCS source  
+            request = discoveryengine_v1beta.ImportDocumentsRequest(
+                parent=parent,
+                gcs_source=gcs_source,
+                reconciliation_mode=discoveryengine_v1beta.ImportDocumentsRequest.ReconciliationMode.INCREMENTAL,
+                auto_generate_ids=False
+            )
+            
+            operation = self.import_client.import_documents(request=request)
+            logger.info(f"Started Cloud Storage import operation: {operation.operation.name}")
+            return operation.operation.name
+            
+        except Exception as e:
+            logger.error(f"Failed to import from Cloud Storage: {str(e)}")
+            raise DataStoreError(f"Failed to import from Cloud Storage: {str(e)}") from e
+    
+    def create_bucket_if_not_exists(self, bucket_name: str, location: str = "US") -> bool:
+        """Create a Cloud Storage bucket if it doesn't exist."""
+        try:
+            # Check if bucket exists
+            try:
+                bucket = self.storage_client.get_bucket(bucket_name)
+                logger.info(f"Bucket {bucket_name} already exists")
+                return True
+            except Exception:
+                # Bucket doesn't exist, create it
+                bucket = self.storage_client.bucket(bucket_name)
+                bucket = self.storage_client.create_bucket(bucket, location=location)
+                logger.info(f"Created bucket {bucket_name} in {location}")
+                return True
+                
+        except Exception as e:
+            logger.error(f"Failed to create bucket: {str(e)}")
+            return False
+    
     def delete_data_store(self, data_store_id: str) -> bool:
         """Delete a data store."""
         try:
@@ -285,21 +424,12 @@ class SearchManager(SearchManagerInterface):
         try:
             parent = f"projects/{self.config_manager.vertex_ai.project_id}/locations/{self.config_manager.vertex_ai.location}/collections/default_collection"
             
-            # Build data store references
-            data_store_specs = []
-            for ds_id in data_store_ids:
-                ds_spec = discoveryengine_v1beta.Engine.SearchEngineConfig.SearchTier.DataStoreSpec(
-                    data_store=f"{parent}/dataStores/{ds_id}"
-                )
-                data_store_specs.append(ds_spec)
+            # Build data store IDs list - use just the data store IDs, not full names
+            # The API expects just the data store IDs, not full resource names
+            data_store_ids_list = list(data_store_ids)
             
-            search_tier = discoveryengine_v1beta.Engine.SearchEngineConfig.SearchTier(
-                data_store_specs=data_store_specs
-            )
-            
-            search_config = discoveryengine_v1beta.Engine.SearchEngineConfig(
-                search_tiers=[search_tier]
-            )
+            # Create search engine config (simplified structure)
+            search_config = discoveryengine_v1beta.Engine.SearchEngineConfig()
             
             # Get industry vertical from config
             vertical_mapping = {
@@ -317,6 +447,7 @@ class SearchManager(SearchManagerInterface):
                 display_name=display_name,
                 solution_type=discoveryengine_v1beta.SolutionType.SOLUTION_TYPE_SEARCH,
                 industry_vertical=industry_vertical,
+                data_store_ids=data_store_ids_list,
                 search_engine_config=search_config
             )
             
@@ -376,7 +507,18 @@ class SearchManager(SearchManagerInterface):
             # Format response
             results = []
             for result in response.results:
-                doc_dict = json.loads(result.document.json_data.decode('utf-8'))
+                # Handle both structData and jsonData formats
+                if hasattr(result.document, 'struct_data') and result.document.struct_data:
+                    doc_dict = dict(result.document.struct_data)
+                elif hasattr(result.document, 'json_data') and result.document.json_data:
+                    # json_data might be bytes or string
+                    json_data = result.document.json_data
+                    if isinstance(json_data, bytes):
+                        json_data = json_data.decode('utf-8')
+                    doc_dict = json.loads(json_data)
+                else:
+                    doc_dict = {}
+                
                 results.append({
                     'document': doc_dict,
                     'score': getattr(result, 'score', None)
@@ -418,18 +560,21 @@ class SearchManager(SearchManagerInterface):
             raise
     
     def _build_filter_string(self, filters: Dict[str, Any]) -> str:
-        """Build filter string from filter dictionary."""
+        """Build filter string from filter dictionary using Vertex AI Discovery Engine syntax."""
         filter_parts = []
         
         for field, value in filters.items():
+            # Add structData prefix for structured data fields
+            field_path = f"structData.{field}" if not field.startswith("structData.") else field
+            
             if isinstance(value, str):
-                filter_parts.append(f'{field}: "{value}"')
+                filter_parts.append(f'{field_path}: ANY("{value}")')
             elif isinstance(value, (int, float)):
-                filter_parts.append(f'{field}: {value}')
+                filter_parts.append(f'{field_path} = {value}')
             elif isinstance(value, list):
-                # OR condition for list values
+                # Use ANY() with comma-separated values
                 value_strs = [f'"{v}"' if isinstance(v, str) else str(v) for v in value]
-                filter_parts.append(f'{field}: ({" OR ".join(value_strs)})')
+                filter_parts.append(f'{field_path}: ANY({", ".join(value_strs)})')
         
         return " AND ".join(filter_parts)
 
@@ -461,12 +606,13 @@ class AutocompleteManager(AutocompleteManagerInterface):
     ) -> List[str]:
         """Get autocomplete suggestions for a query."""
         try:
-            parent = f"projects/{self.config_manager.vertex_ai.project_id}/locations/{self.config_manager.vertex_ai.location}/collections/default_collection/engines/{engine_id}"
+            # CompleteQueryRequest uses data_store, not parent or engine
+            data_store = f"projects/{self.config_manager.vertex_ai.project_id}/locations/{self.config_manager.vertex_ai.location}/collections/default_collection/dataStores/{self.config_manager.vertex_ai.data_store_id}"
             
             request = discoveryengine_v1beta.CompleteQueryRequest(
-                parent=parent,
+                data_store=data_store,
                 query=query,
-                query_model=f"projects/{self.config_manager.vertex_ai.project_id}/locations/{self.config_manager.vertex_ai.location}/collections/default_collection/engines/{engine_id}/queryModel"
+                include_tail_suggestions=True
             )
             
             response = self.completion_client.complete_query(request)
@@ -547,7 +693,18 @@ class RecommendationManager(RecommendationManagerInterface):
             
             recommendations = []
             for result in response.results:
-                doc_dict = json.loads(result.document.json_data.decode('utf-8'))
+                # Handle both structData and jsonData formats
+                if hasattr(result.document, 'struct_data') and result.document.struct_data:
+                    doc_dict = dict(result.document.struct_data)
+                elif hasattr(result.document, 'json_data') and result.document.json_data:
+                    # json_data might be bytes or string
+                    json_data = result.document.json_data
+                    if isinstance(json_data, bytes):
+                        json_data = json_data.decode('utf-8')
+                    doc_dict = json.loads(json_data)
+                else:
+                    doc_dict = {}
+                
                 recommendations.append({
                     'document': doc_dict,
                     'score': getattr(result, 'score', None)

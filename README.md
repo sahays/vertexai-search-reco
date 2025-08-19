@@ -83,28 +83,35 @@ VERTEX_LOCATION=global
 python generate_sample_data.py
 ```
 
-### 5. Create and Index Dataset
-
-```bash
-# Using environment variables
-vertex-search --schema examples/drama_shorts_schema.json --project-id your-project-id dataset create examples/sample_data.json
-
-# Or using config file
-vertex-search --config my_config.json dataset create examples/sample_data.json
-```
-
-### 6. Create Data Store and Search Engine
+### 5. Create Data Store and Search Engine
 
 ```bash
 # Create data store
 vertex-search --config my_config.json datastore create my-datastore --display-name "My Media Store"
 
-# Import documents
-vertex-search --config my_config.json datastore import my-datastore examples/sample_data.json --wait
-
 # Create search engine
 vertex-search --config my_config.json search create-engine my-engine my-datastore --display-name "My Search Engine"
 ```
+
+### 6. Upload and Import Data (Cloud Storage Approach - Recommended)
+
+```bash
+# Step 1: Upload data to Cloud Storage
+vertex-search --config my_config.json datastore upload-gcs examples/sample_data.json your-bucket-name --create-bucket --folder vertex-ai-search
+
+# Step 2: Import from Cloud Storage to Vertex AI
+vertex-search --config my_config.json datastore import-gcs my-datastore gs://your-bucket-name/vertex-ai-search/* --wait
+
+# Step 3: Verify documents were imported
+vertex-search --config my_config.json datastore list my-datastore --count 5
+```
+
+**Why Cloud Storage?**
+- ✅ **Full Console Visibility**: See your data in GCP Console
+- ✅ **Better Reliability**: More stable than inline import
+- ✅ **Easy Debugging**: Files visible in Cloud Storage
+- ✅ **Source of Truth**: Files remain for re-import if needed
+- ✅ **Correct Document Format**: Uses proper Vertex AI Document schema with `structData`
 
 ### 7. Search Your Content
 
@@ -121,6 +128,26 @@ vertex-search --config my_config.json autocomplete suggest "rom" --engine-id my-
 # Get recommendations
 vertex-search --config my_config.json recommend get --user-id user123 --event-type view --engine-id my-engine
 ```
+
+## Import Methods Comparison
+
+### Cloud Storage Import (Recommended)
+```bash
+# Upload to Cloud Storage first
+vertex-search --config my_config.json datastore upload-gcs data.json bucket-name --create-bucket
+# Then import from Cloud Storage
+vertex-search --config my_config.json datastore import-gcs datastore-id gs://bucket-name/vertex-ai-search/*
+```
+**Pros**: Full console visibility, reliable, easy debugging, source of truth
+**Best for**: Production use, large datasets, when you need to see data in console
+
+### Inline Import (Legacy)
+```bash
+vertex-search --config my_config.json datastore import datastore-id data.json
+```
+**Pros**: Single command
+**Cons**: Limited console visibility, less reliable for large datasets
+**Best for**: Quick testing only
 
 ## Architecture
 
@@ -204,11 +231,25 @@ vertex-search --config <config_file> dataset generate [--count 1000] [--output f
 # Create data store
 vertex-search --config <config_file> datastore create <data_store_id> [--display-name "Name"]
 
-# Import documents
-vertex-search --config <config_file> datastore import <data_store_id> <data_file> [--wait]
+# Upload to Cloud Storage (RECOMMENDED)
+vertex-search --config <config_file> datastore upload-gcs <data_file> <bucket_name> [--create-bucket] [--folder path]
 
-# example (iteratively uses a batch of 100 to upload the dataset)
-vertex-search --config my_config.json datastore import my-datastore examples/sample_data.json --wait
+# Import from Cloud Storage (RECOMMENDED) 
+vertex-search --config <config_file> datastore import-gcs <data_store_id> <gcs_uri> [--wait]
+
+# List documents to verify import
+vertex-search --config <config_file> datastore list <data_store_id> [--count 10]
+
+# Legacy inline import (NOT RECOMMENDED)
+vertex-search --config <config_file> datastore import <data_store_id> <data_file> [--wait]
+```
+
+**Examples:**
+```bash
+# Recommended workflow
+vertex-search --config my_config.json datastore upload-gcs examples/sample_data.json my-bucket --create-bucket
+vertex-search --config my_config.json datastore import-gcs my-datastore gs://my-bucket/vertex-ai-search/* --wait
+vertex-search --config my_config.json datastore list my-datastore --count 5
 ```
 
 ### Search Commands

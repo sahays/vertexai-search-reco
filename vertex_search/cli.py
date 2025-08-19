@@ -156,13 +156,141 @@ def create_datastore(ctx, data_store_id: str, display_name: Optional[str]):
         ctx.exit(1)
 
 
-@datastore.command('import')
+@datastore.command('list')
+@click.argument('data_store_id')
+@click.option('--count', default=10, help='Number of documents to list')
+@click.pass_context
+def list_documents(ctx, data_store_id: str, count: int):
+    """List documents in a data store to verify import."""
+    config_manager: ConfigManager = ctx.obj['config_manager']
+    asset_manager = MediaAssetManager(config_manager)
+    
+    try:
+        result = asset_manager.list_documents(data_store_id, count)
+        
+        if 'error' in result:
+            console.print(f"[red]Error: {result['error']}[/red]")
+            ctx.exit(1)
+        
+        console.print(f"[green]Found {result['count']} documents in data store '{data_store_id}'[/green]")
+        
+        if result['documents']:
+            table = Table(title=f"Documents in {data_store_id}")
+            table.add_column("Document ID", style="cyan")
+            table.add_column("Resource Name", style="green")
+            
+            for doc in result['documents']:
+                table.add_row(doc['id'], doc['name'])
+            
+            console.print(table)
+        else:
+            console.print("[yellow]No documents found. Documents may still be indexing.[/yellow]")
+            
+    except Exception as e:
+        console.print(f"[red]Error: {str(e)}[/red]")
+        ctx.exit(1)
+
+
+@datastore.command('upload-gcs')
+@click.argument('data_file', type=click.Path(exists=True, path_type=Path))
+@click.argument('bucket_name')
+@click.option('--folder', default="vertex-ai-search", help='Folder path in the bucket')
+@click.option('--create-bucket', is_flag=True, help='Create bucket if it does not exist')
+@click.pass_context  
+def upload_to_gcs(ctx, data_file: Path, bucket_name: str, folder: str, create_bucket: bool):
+    """Upload documents to Cloud Storage for import."""
+    config_manager: ConfigManager = ctx.obj['config_manager']
+    asset_manager = MediaAssetManager(config_manager)
+    dataset_manager = DatasetManager(config_manager)
+    
+    try:
+        # Create bucket if requested
+        if create_bucket:
+            console.print(f"Creating bucket '{bucket_name}' if it doesn't exist...")
+            if not asset_manager.create_bucket_if_not_exists(bucket_name):
+                console.print(f"[red]✗ Failed to create bucket '{bucket_name}'[/red]")
+                ctx.exit(1)
+        
+        # Load data
+        data = dataset_manager.load_data_from_file(data_file)
+        console.print(f"Uploading {len(data)} documents to gs://{bucket_name}/{folder}/...")
+        
+        # Upload to Cloud Storage
+        uris = asset_manager.upload_to_cloud_storage(bucket_name, data, folder)
+        
+        console.print(f"[green]✓ Uploaded {len(uris)} documents to Cloud Storage[/green]")
+        console.print(f"[blue]GCS Path: gs://{bucket_name}/{folder}/[/blue]")
+        console.print("\nNext steps:")
+        console.print(f"1. Import from GCS: vertex-search --config my_config.json datastore import-gcs {bucket_name} gs://{bucket_name}/{folder}/*")
+        console.print(f"2. Check documents: vertex-search --config my_config.json datastore list {bucket_name}")
+        
+    except Exception as e:
+        console.print(f"[red]Error: {str(e)}[/red]")
+        ctx.exit(1)
+
+
+@datastore.command('import-gcs')
+@click.argument('data_store_id') 
+@click.argument('gcs_uri')
+@click.option('--data-schema', default='document', help='Data schema: document, content, or custom')
+@click.option('--wait', is_flag=True, help='Wait for import to complete')
+@click.pass_context
+def import_from_gcs(ctx, data_store_id: str, gcs_uri: str, data_schema: str, wait: bool):
+    """Import documents from Cloud Storage."""
+    config_manager: ConfigManager = ctx.obj['config_manager']
+    asset_manager = MediaAssetManager(config_manager)
+    
+    try:
+        console.print(f"Importing from {gcs_uri} to data store '{data_store_id}'...")
+        console.print(f"Using data schema: {data_schema}")
+        
+        operation_id = asset_manager.import_from_cloud_storage(data_store_id, gcs_uri, data_schema)
+        console.print(f"[green]✓ Import started with operation ID: {operation_id}[/green]")
+        
+        if wait:
+            console.print("Waiting for import to complete...")
+            import time
+            while True:
+                status = asset_manager.get_import_status(operation_id)
+                if status.get('done', False):
+                    if 'error' in status:
+                        console.print(f"[red]✗ Import failed: {status['error']}[/red]")
+                        ctx.exit(1)
+                    else:
+                        console.print("[green]✓ Import completed successfully[/green]")
+                        break
+                time.sleep(10)
+        else:
+            console.print("Import is running in the background. Check the GCP console for progress.")
+            console.print(f"Data should appear in the console at: Cloud Storage > gs://{gcs_uri.split('/')[2]}/")
+            
+    except Exception as e:
+        console.print(f"[red]Error: {str(e)}[/red]")
+        ctx.exit(1)
+
+
+@datastore.command('import')  
 @click.argument('data_store_id')
 @click.argument('data_file', type=click.Path(exists=True, path_type=Path))
 @click.option('--wait', is_flag=True, help='Wait for import to complete')
 @click.pass_context
 def import_documents(ctx, data_store_id: str, data_file: Path, wait: bool):
-    """Import documents to a data store."""
+    """Import documents to a data store (DEPRECATED: Use upload-gcs + import-gcs instead)."""
+    console.print("[yellow]WARNING: Inline import has limited console visibility.[/yellow]")
+    console.print("[yellow]Recommended: Use 'upload-gcs' + 'import-gcs' for better reliability.[/yellow]")
+    console.print("Continue with inline import? [y/N]: ", nl=False)
+    
+    import sys
+    try:
+        response = input().strip().lower()
+        if response not in ['y', 'yes']:
+            console.print("Import cancelled. Use the Cloud Storage workflow instead:")
+            console.print(f"1. vertex-search --config my_config.json datastore upload-gcs {data_file} your-bucket-name")
+            console.print(f"2. vertex-search --config my_config.json datastore import-gcs {data_store_id} gs://your-bucket-name/vertex-ai-search/*")
+            ctx.exit(0)
+    except (EOFError, KeyboardInterrupt):
+        ctx.exit(0)
+    
     config_manager: ConfigManager = ctx.obj['config_manager']
     asset_manager = MediaAssetManager(config_manager)
     dataset_manager = DatasetManager(config_manager)
