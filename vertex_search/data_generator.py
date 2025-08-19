@@ -76,6 +76,20 @@ class DataGenerator(DataGeneratorInterface):
             
             if constraints:
                 analysis['constraints'][field_name] = constraints
+            
+            # Also analyze nested object properties
+            if field_type == 'object' and 'properties' in field_spec:
+                for nested_field, nested_spec in field_spec['properties'].items():
+                    nested_key = f"{field_name}.{nested_field}"
+                    analysis['field_types'][nested_key] = nested_spec.get('type')
+                    
+                    nested_constraints = {}
+                    for constraint in ['minimum', 'maximum', 'minLength', 'maxLength']:
+                        if constraint in nested_spec:
+                            nested_constraints[constraint] = nested_spec[constraint]
+                    
+                    if nested_constraints:
+                        analysis['constraints'][nested_key] = nested_constraints
         
         return analysis
     
@@ -184,13 +198,13 @@ class DataGenerator(DataGeneratorInterface):
     def _generate_integer_value(self, constraints: Dict[str, Any]) -> int:
         """Generate integer value within constraints."""
         minimum = constraints.get('minimum', 0)
-        maximum = constraints.get('maximum', 1000000)
+        maximum = constraints.get('maximum', 1000)  # More reasonable default
         return random.randint(minimum, maximum)
     
     def _generate_number_value(self, constraints: Dict[str, Any]) -> float:
         """Generate number value within constraints."""
         minimum = constraints.get('minimum', 0.0)
-        maximum = constraints.get('maximum', 1000000.0)
+        maximum = constraints.get('maximum', 100.0)  # More reasonable default
         return round(random.uniform(minimum, maximum), 2)
     
     def _generate_array_value(
@@ -244,6 +258,15 @@ class DataGenerator(DataGeneratorInterface):
                 
                 if prop_spec.get('enum'):
                     nested_analysis['enums'][prop_name] = prop_spec['enum']
+                
+                # Extract constraints for nested property
+                constraints = {}
+                for constraint in ['minimum', 'maximum', 'minLength', 'maxLength']:
+                    if constraint in prop_spec:
+                        constraints[constraint] = prop_spec[constraint]
+                
+                if constraints:
+                    nested_analysis['constraints'][prop_name] = constraints
                 
                 value = self._generate_field_value(prop_name, prop_spec, nested_analysis)
                 if value is not None:

@@ -12,7 +12,9 @@ class VertexAIConfig(BaseModel):
     """Configuration for Vertex AI Search."""
     
     project_id: str = Field(..., description="Google Cloud Project ID")
+    api_key: Optional[str] = Field(None, description="Google Cloud API Key")
     location: str = Field(default="global", description="Vertex AI location")
+    industry_vertical: str = Field(default="GENERIC", description="Industry vertical (GENERIC, MEDIA, HEALTHCARE_FHIR)")
     data_store_id: Optional[str] = Field(None, description="Data store ID")
     engine_id: Optional[str] = Field(None, description="Search engine ID")
     serving_config_id: str = Field(default="default_config", description="Serving config ID")
@@ -36,8 +38,10 @@ class SchemaConfig(BaseModel):
 class AppConfig(BaseModel):
     """Main application configuration."""
     
+    model_config = {"populate_by_name": True}
+    
     vertex_ai: VertexAIConfig
-    schema: SchemaConfig
+    schema_config: SchemaConfig = Field(alias="schema")
     data_directory: Path = Field(default=Path("data"), description="Directory for data files")
     output_directory: Path = Field(default=Path("output"), description="Directory for output files")
     batch_size: int = Field(default=100, description="Batch size for operations")
@@ -57,7 +61,9 @@ class AppConfig(BaseModel):
         
         vertex_config = VertexAIConfig(
             project_id=os.getenv("VERTEX_PROJECT_ID", ""),
+            api_key=os.getenv("VERTEX_API_KEY"),
             location=os.getenv("VERTEX_LOCATION", "global"),
+            industry_vertical=os.getenv("VERTEX_INDUSTRY_VERTICAL", "GENERIC"),
             data_store_id=os.getenv("VERTEX_DATA_STORE_ID"),
             engine_id=os.getenv("VERTEX_ENGINE_ID"),
             serving_config_id=os.getenv("VERTEX_SERVING_CONFIG_ID", "default_config")
@@ -75,7 +81,7 @@ class AppConfig(BaseModel):
         
         return cls(
             vertex_ai=vertex_config,
-            schema=schema_config,
+            schema_config=schema_config,
             data_directory=Path(os.getenv("DATA_DIRECTORY", "data")),
             output_directory=Path(os.getenv("OUTPUT_DIRECTORY", "output")),
             batch_size=int(os.getenv("BATCH_SIZE", "100")),
@@ -103,14 +109,14 @@ class ConfigManager:
     @property
     def schema(self) -> SchemaConfig:
         """Get schema configuration."""
-        return self.config.schema
+        return self.config.schema_config
     
     def validate_schema_file(self) -> Dict[str, Any]:
         """Validate and load the schema file."""
-        if not self.config.schema.schema_file.exists():
-            raise FileNotFoundError(f"Schema file not found: {self.config.schema.schema_file}")
+        if not self.config.schema_config.schema_file.exists():
+            raise FileNotFoundError(f"Schema file not found: {self.config.schema_config.schema_file}")
         
-        with open(self.config.schema.schema_file) as f:
+        with open(self.config.schema_config.schema_file) as f:
             schema = json.load(f)
         
         # Basic validation
@@ -124,8 +130,8 @@ class ConfigManager:
     
     def get_searchable_fields(self, schema: Dict[str, Any]) -> list[str]:
         """Get list of searchable fields from schema."""
-        if self.config.schema.searchable_fields:
-            return self.config.schema.searchable_fields
+        if self.config.schema_config.searchable_fields:
+            return self.config.schema_config.searchable_fields
         
         # Auto-detect searchable fields (string types)
         searchable = []
@@ -140,8 +146,8 @@ class ConfigManager:
     
     def get_filterable_fields(self, schema: Dict[str, Any]) -> list[str]:
         """Get list of filterable fields from schema."""
-        if self.config.schema.filterable_fields:
-            return self.config.schema.filterable_fields
+        if self.config.schema_config.filterable_fields:
+            return self.config.schema_config.filterable_fields
         
         # Auto-detect filterable fields (enums, numbers, booleans)
         filterable = []

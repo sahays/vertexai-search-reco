@@ -23,6 +23,7 @@ from .utils import (
     SearchError,
     setup_logging
 )
+from .auth import get_credentials, setup_client_options
 
 logger = setup_logging()
 
@@ -109,9 +110,21 @@ class MediaAssetManager(MediaAssetManagerInterface):
     
     def __init__(self, config_manager: ConfigManager):
         self.config_manager = config_manager
-        self.client = discoveryengine_v1beta.DataStoreServiceClient()
-        self.document_client = discoveryengine_v1beta.DocumentServiceClient()
-        self.import_client = discoveryengine_v1beta.DocumentServiceClient()
+        
+        # Get credentials and client options
+        credentials = get_credentials(config_manager.vertex_ai)
+        client_options = setup_client_options(config_manager.vertex_ai)
+        
+        # Initialize clients with credentials (only if not using API key)
+        client_kwargs = {}
+        if credentials is not None:
+            client_kwargs["credentials"] = credentials
+        if client_options is not None:
+            client_kwargs["client_options"] = client_options
+            
+        self.client = discoveryengine_v1beta.DataStoreServiceClient(**client_kwargs)
+        self.document_client = discoveryengine_v1beta.DocumentServiceClient(**client_kwargs)
+        self.import_client = discoveryengine_v1beta.DocumentServiceClient(**client_kwargs)
         
     @handle_vertex_ai_error
     def create_data_store(self, data_store_id: str, display_name: str) -> bool:
@@ -119,9 +132,21 @@ class MediaAssetManager(MediaAssetManagerInterface):
         try:
             parent = f"projects/{self.config_manager.vertex_ai.project_id}/locations/{self.config_manager.vertex_ai.location}/collections/default_collection"
             
+            # Get industry vertical from config
+            vertical_mapping = {
+                "GENERIC": discoveryengine_v1beta.IndustryVertical.GENERIC,
+                "MEDIA": discoveryengine_v1beta.IndustryVertical.MEDIA,
+                "HEALTHCARE_FHIR": discoveryengine_v1beta.IndustryVertical.HEALTHCARE_FHIR
+            }
+            
+            industry_vertical = vertical_mapping.get(
+                self.config_manager.vertex_ai.industry_vertical, 
+                discoveryengine_v1beta.IndustryVertical.GENERIC
+            )
+            
             data_store = discoveryengine_v1beta.DataStore(
                 display_name=display_name,
-                industry_vertical=discoveryengine_v1beta.IndustryVertical.MEDIA,
+                industry_vertical=industry_vertical,
                 solution_types=[discoveryengine_v1beta.SolutionType.SOLUTION_TYPE_SEARCH],
                 content_config=discoveryengine_v1beta.DataStore.ContentConfig.CONTENT_REQUIRED
             )
@@ -143,36 +168,66 @@ class MediaAssetManager(MediaAssetManagerInterface):
     
     @handle_vertex_ai_error
     def import_documents(self, data_store_id: str, documents: List[Dict[str, Any]]) -> str:
-        """Import documents to the data store. Returns operation ID."""
+        """Import documents to the data store in batches. Returns operation ID of the last batch."""
         try:
             parent = f"projects/{self.config_manager.vertex_ai.project_id}/locations/{self.config_manager.vertex_ai.location}/collections/default_collection/dataStores/{data_store_id}/branches/default_branch"
-            
-            # Convert documents to Vertex AI format
-            vertex_documents = []
             id_field = self.config_manager.schema.id_field
+            batch_size = 100  # API limit
+            total_documents = len(documents)
+            operation_ids = []
             
-            for doc in documents:
-                # Extract ID
-                doc_id = str(doc.get(id_field, ''))
-                if not doc_id:
-                    raise ValueError(f"Document missing required field '{id_field}'")
+            logger.info(f"Importing {total_documents} documents in batches of {batch_size}")
+            
+            # Process documents in batches
+            for batch_start in range(0, total_documents, batch_size):
+                batch_end = min(batch_start + batch_size, total_documents)
+                batch_documents = documents[batch_start:batch_end]
                 
-                # Create document
-                vertex_doc = discoveryengine_v1beta.Document(
-                    id=doc_id,
-                    json_data=json.dumps(doc).encode('utf-8')
+                logger.info(f"Processing batch {batch_start//batch_size + 1}: documents {batch_start + 1}-{batch_end}")
+                
+                # Convert batch to Vertex AI format
+                vertex_documents = []
+                for doc in batch_documents:
+                    # Extract ID
+                    doc_id = str(doc.get(id_field, ''))
+                    if not doc_id:
+                        raise ValueError(f"Document missing required field '{id_field}'")
+                    
+                    # Create document
+                    vertex_doc = discoveryengine_v1beta.Document(
+                        id=doc_id,
+                        json_data=json.dumps(doc).encode('utf-8')
+                    )
+                    vertex_documents.append(vertex_doc)
+                
+                # Create inline source with batch documents
+                inline_source = discoveryengine_v1beta.ImportDocumentsRequest.InlineSource(
+                    documents=vertex_documents
                 )
-                vertex_documents.append(vertex_doc)
+                
+                # Create import request with inline source
+                request = discoveryengine_v1beta.ImportDocumentsRequest(
+                    parent=parent,
+                    inline_source=inline_source,
+                    reconciliation_mode=discoveryengine_v1beta.ImportDocumentsRequest.ReconciliationMode.INCREMENTAL,
+                    auto_generate_ids=False
+                )
+                
+                operation = self.import_client.import_documents(request=request)
+                operation_id = operation.operation.name
+                operation_ids.append(operation_id)
+                
+                logger.info(f"Batch {batch_start//batch_size + 1} import started: {operation_id}")
+                
+                # Small delay between batches to avoid rate limiting
+                if batch_end < total_documents:
+                    import time
+                    time.sleep(1)
             
-            # Create import request
-            request = discoveryengine_v1beta.ImportDocumentsRequest(
-                parent=parent,
-                documents=vertex_documents
-            )
+            logger.info(f"All {len(operation_ids)} batches submitted. Total documents: {total_documents}")
             
-            operation = self.import_client.import_documents(request=request)
-            logger.info(f"Started import operation: {operation.operation.name}")
-            return operation.operation.name
+            # Return the last operation ID for monitoring
+            return operation_ids[-1] if operation_ids else ""
             
         except Exception as e:
             logger.error(f"Failed to import documents: {str(e)}")
@@ -209,8 +264,20 @@ class SearchManager(SearchManagerInterface):
     
     def __init__(self, config_manager: ConfigManager):
         self.config_manager = config_manager
-        self.engine_client = discoveryengine_v1beta.EngineServiceClient()
-        self.search_client = discoveryengine_v1beta.SearchServiceClient()
+        
+        # Get credentials and client options
+        credentials = get_credentials(config_manager.vertex_ai)
+        client_options = setup_client_options(config_manager.vertex_ai)
+        
+        # Initialize clients with credentials (only if not using API key)
+        client_kwargs = {}
+        if credentials is not None:
+            client_kwargs["credentials"] = credentials
+        if client_options is not None:
+            client_kwargs["client_options"] = client_options
+            
+        self.engine_client = discoveryengine_v1beta.EngineServiceClient(**client_kwargs)
+        self.search_client = discoveryengine_v1beta.SearchServiceClient(**client_kwargs)
     
     @handle_vertex_ai_error
     def create_search_engine(self, engine_id: str, display_name: str, data_store_ids: List[str]) -> bool:
@@ -234,10 +301,22 @@ class SearchManager(SearchManagerInterface):
                 search_tiers=[search_tier]
             )
             
+            # Get industry vertical from config
+            vertical_mapping = {
+                "GENERIC": discoveryengine_v1beta.IndustryVertical.GENERIC,
+                "MEDIA": discoveryengine_v1beta.IndustryVertical.MEDIA,
+                "HEALTHCARE_FHIR": discoveryengine_v1beta.IndustryVertical.HEALTHCARE_FHIR
+            }
+            
+            industry_vertical = vertical_mapping.get(
+                self.config_manager.vertex_ai.industry_vertical, 
+                discoveryengine_v1beta.IndustryVertical.GENERIC
+            )
+            
             engine = discoveryengine_v1beta.Engine(
                 display_name=display_name,
                 solution_type=discoveryengine_v1beta.SolutionType.SOLUTION_TYPE_SEARCH,
-                industry_vertical=discoveryengine_v1beta.IndustryVertical.MEDIA,
+                industry_vertical=industry_vertical,
                 search_engine_config=search_config
             )
             
@@ -360,7 +439,19 @@ class AutocompleteManager(AutocompleteManagerInterface):
     
     def __init__(self, config_manager: ConfigManager):
         self.config_manager = config_manager
-        self.completion_client = discoveryengine_v1beta.CompletionServiceClient()
+        
+        # Get credentials and client options
+        credentials = get_credentials(config_manager.vertex_ai)
+        client_options = setup_client_options(config_manager.vertex_ai)
+        
+        # Initialize client with credentials (only if not using API key)
+        client_kwargs = {}
+        if credentials is not None:
+            client_kwargs["credentials"] = credentials
+        if client_options is not None:
+            client_kwargs["client_options"] = client_options
+            
+        self.completion_client = discoveryengine_v1beta.CompletionServiceClient(**client_kwargs)
     
     def get_suggestions(
         self, 
@@ -412,8 +503,20 @@ class RecommendationManager(RecommendationManagerInterface):
     
     def __init__(self, config_manager: ConfigManager):
         self.config_manager = config_manager
-        self.recommendation_client = discoveryengine_v1beta.RecommendationServiceClient()
-        self.user_event_client = discoveryengine_v1beta.UserEventServiceClient()
+        
+        # Get credentials and client options
+        credentials = get_credentials(config_manager.vertex_ai)
+        client_options = setup_client_options(config_manager.vertex_ai)
+        
+        # Initialize clients with credentials (only if not using API key)
+        client_kwargs = {}
+        if credentials is not None:
+            client_kwargs["credentials"] = credentials
+        if client_options is not None:
+            client_kwargs["client_options"] = client_options
+            
+        self.recommendation_client = discoveryengine_v1beta.RecommendationServiceClient(**client_kwargs)
+        self.user_event_client = discoveryengine_v1beta.UserEventServiceClient(**client_kwargs)
     
     def get_recommendations(
         self,

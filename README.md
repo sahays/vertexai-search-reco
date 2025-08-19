@@ -32,12 +32,26 @@ pip install -e .
 
 1. Create a Google Cloud Project
 2. Enable the Discovery Engine API
-3. Create a service account and download the JSON key
-4. Set up authentication:
+3. Choose an authentication method:
+
+**Option A: Application Default Credentials (Recommended)**
 
 ```bash
-export GOOGLE_APPLICATION_CREDENTIALS="path/to/your/service-account-key.json"
+# Use gcloud CLI authentication
+gcloud auth application-default login
+export VERTEX_PROJECT_ID="your-gcp-project-id"
 ```
+
+**Option B: Service Account Key File**
+
+```bash
+# Create a service account and download the JSON key
+export GOOGLE_APPLICATION_CREDENTIALS="path/to/your/service-account-key.json"
+export VERTEX_PROJECT_ID="your-gcp-project-id"
+```
+
+**Note**: API keys are not supported by the Discovery Engine API. You must use OAuth2 credentials (gcloud auth or
+service account).
 
 ### 3. Configuration
 
@@ -51,10 +65,16 @@ cp examples/config.json my_config.json
 Edit the configuration files with your project details:
 
 ```bash
-# .env
+# .env - Using Application Default Credentials (recommended)
 VERTEX_PROJECT_ID=your-gcp-project-id
 VERTEX_LOCATION=global
 ```
+
+**Important**: Make sure to:
+
+1. Enable the Discovery Engine API: `gcloud services enable discoveryengine.googleapis.com`
+2. Set up proper IAM permissions (Discovery Engine Admin/Editor role)
+3. Run `gcloud auth application-default login` for authentication
 
 ### 4. Generate Sample Data
 
@@ -77,29 +97,29 @@ vertex-search --config my_config.json dataset create examples/sample_data.json
 
 ```bash
 # Create data store
-vertex-search datastore create my-datastore --display-name "My Media Store"
+vertex-search --config my_config.json datastore create my-datastore --display-name "My Media Store"
 
 # Import documents
-vertex-search datastore import my-datastore examples/sample_data.json --wait
+vertex-search --config my_config.json datastore import my-datastore examples/sample_data.json --wait
 
 # Create search engine
-vertex-search search create-engine my-engine my-datastore --display-name "My Search Engine"
+vertex-search --config my_config.json search create-engine my-engine my-datastore --display-name "My Search Engine"
 ```
 
 ### 7. Search Your Content
 
 ```bash
 # Basic search
-vertex-search search query "romantic drama" --engine-id my-engine
+vertex-search --config my_config.json search query "romantic drama" --engine-id my-engine
 
 # Search with filters
-vertex-search search query "love story" --engine-id my-engine --filters '{"genre": ["romantic_drama"]}'
+vertex-search --config my_config.json search query "love story" --engine-id my-engine --filters '{"genre": ["romantic_drama"]}'
 
 # Get autocomplete suggestions
-vertex-search autocomplete suggest "rom" --engine-id my-engine
+vertex-search --config my_config.json autocomplete suggest "rom" --engine-id my-engine
 
 # Get recommendations
-vertex-search recommend get --user-id user123 --event-type view --engine-id my-engine
+vertex-search --config my_config.json recommend get --user-id user123 --event-type view --engine-id my-engine
 ```
 
 ## Architecture
@@ -161,7 +181,7 @@ Update your configuration to specify which fields to use for search operations:
 
 ```bash
 # The data generator will automatically create realistic data based on your schema
-vertex-search dataset generate --count 1000 --output my_sample_data.json
+vertex-search --config my_config.json dataset generate --count 1000 --output my_sample_data.json
 ```
 
 ## CLI Reference
@@ -170,44 +190,49 @@ vertex-search dataset generate --count 1000 --output my_sample_data.json
 
 ```bash
 # Create and validate dataset
-vertex-search dataset create <data_file> [--validate-only]
+vertex-search --config <config_file> dataset create <data_file> [--validate-only]
+# OR using environment variables
+vertex-search --schema <schema_file> --project-id <project_id> dataset create <data_file>
 
 # Generate sample data
-vertex-search dataset generate [--count 1000] [--output file.json] [--seed 42]
+vertex-search --config <config_file> dataset generate [--count 1000] [--output file.json] [--seed 42]
 ```
 
 ### Data Store Commands
 
 ```bash
 # Create data store
-vertex-search datastore create <data_store_id> [--display-name \"Name\"]
+vertex-search --config <config_file> datastore create <data_store_id> [--display-name "Name"]
 
 # Import documents
-vertex-search datastore import <data_store_id> <data_file> [--wait]
+vertex-search --config <config_file> datastore import <data_store_id> <data_file> [--wait]
+
+# example (iteratively uses a batch of 100 to upload the dataset)
+vertex-search --config my_config.json datastore import my-datastore examples/sample_data.json --wait
 ```
 
 ### Search Commands
 
 ```bash
 # Create search engine
-vertex-search search create-engine <engine_id> <data_store_id> [--display-name \"Name\"]
+vertex-search --config <config_file> search create-engine <engine_id> <data_store_id> [--display-name "Name"]
 
 # Search with options
-vertex-search search query <query> [--engine-id <id>] [--filters <json>] [--facets <list>]
+vertex-search --config <config_file> search query <query> [--engine-id <id>] [--filters <json>] [--facets <list>]
 ```
 
 ### Autocomplete Commands
 
 ```bash
 # Get suggestions
-vertex-search autocomplete suggest <query> [--engine-id <id>]
+vertex-search --config <config_file> autocomplete suggest <query> [--engine-id <id>]
 ```
 
 ### Recommendation Commands
 
 ```bash
 # Get recommendations
-vertex-search recommend get --user-id <id> [--event-type view] [--engine-id <id>]
+vertex-search --config <config_file> recommend get --user-id <id> [--event-type view] [--engine-id <id>]
 ```
 
 ## Integration with Frontend Applications
@@ -253,16 +278,59 @@ async def search(q: str, filters: str = None):
     return results
 ```
 
+## Authentication
+
+The system supports multiple authentication methods with automatic fallback:
+
+### Method 1: API Key (Recommended)
+
+```bash
+export VERTEX_PROJECT_ID="your-gcp-project-id"
+export VERTEX_API_KEY="your-google-cloud-api-key"
+```
+
+**To create an API Key:**
+
+1. Go to Google Cloud Console → APIs & Services → Credentials
+2. Click "Create Credentials" → "API Key"
+3. Restrict the key to Discovery Engine API for security
+4. Copy the key and set the environment variable
+
+### Method 2: Service Account Key File
+
+```bash
+export GOOGLE_APPLICATION_CREDENTIALS="path/to/service-account.json"
+export VERTEX_PROJECT_ID="your-gcp-project-id"
+```
+
+### Method 3: Application Default Credentials
+
+```bash
+gcloud auth application-default login
+export VERTEX_PROJECT_ID="your-gcp-project-id"
+```
+
+### Method 4: Compute Engine/Cloud Run Service Account
+
+No additional setup needed when running on Google Cloud services.
+
 ## Configuration Options
 
 ### Environment Variables
 
 All configuration can be set via environment variables (see `examples/.env.example`):
 
-- `VERTEX_PROJECT_ID`: Google Cloud Project ID
+**Authentication:**
+
+- `VERTEX_PROJECT_ID`: Google Cloud Project ID (required)
+- `VERTEX_API_KEY`: Google Cloud API Key (recommended method)
 - `VERTEX_LOCATION`: Vertex AI location (default: global)
+
+**Schema Configuration:**
+
 - `SCHEMA_SEARCHABLE_FIELDS`: Comma-separated list of searchable fields
 - `SCHEMA_FILTERABLE_FIELDS`: Comma-separated list of filterable fields
+- `SCHEMA_FACETABLE_FIELDS`: Comma-separated list of facetable fields
 
 ### Configuration File
 
@@ -272,12 +340,14 @@ Use JSON configuration files for complex setups (see `examples/config.json`):
 {
   \"vertex_ai\": {
     \"project_id\": \"your-project\",
+    \"api_key\": \"your-api-key\",
     \"location\": \"global\"
   },
   \"schema\": {
     \"schema_file\": \"your_schema.json\",
     \"searchable_fields\": [\"title\", \"content\"],
-    \"filterable_fields\": [\"category\", \"date\"]
+    \"filterable_fields\": [\"category\", \"date\"],
+    \"facetable_fields\": [\"category\", \"type\"]
   }
 }
 ```

@@ -3,7 +3,10 @@ __pycache__/
 *.py[codz]
 *$py.class
 
-.env
+.env*
+my_config.json
+sample_data.json
+output/
 
 # C extensions
 *.so
