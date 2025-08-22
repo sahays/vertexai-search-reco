@@ -421,6 +421,115 @@ The `examples/` directory contains a complete example for a drama shorts platfor
 
 This demonstrates the system's flexibility while providing a concrete example for a media startup.
 
+## Troubleshooting
+
+### Common Issues and Solutions
+
+#### 1. "Project was not passed and could not be determined from the environment"
+
+**Error:**
+```
+OSError: Project was not passed and could not be determined from the environment.
+```
+
+**Solution:**
+This error occurs when the Google Cloud project ID is not properly configured. Fix by:
+
+1. **Set the environment variable:**
+   ```bash
+   export VERTEX_PROJECT_ID="your-gcp-project-id"
+   ```
+
+2. **Or set it in your config file:**
+   ```json
+   {
+     "vertex_ai": {
+       "project_id": "your-gcp-project-id"
+     }
+   }
+   ```
+
+3. **Or use gcloud default project:**
+   ```bash
+   gcloud config set project your-gcp-project-id
+   ```
+
+#### 2. Authentication Issues
+
+**Error:** Permission denied or authentication failures
+
+**Solutions:**
+
+1. **Use Application Default Credentials (Recommended):**
+   ```bash
+   gcloud auth application-default login
+   export VERTEX_PROJECT_ID="your-gcp-project-id"
+   ```
+
+2. **Enable required APIs:**
+   ```bash
+   gcloud services enable discoveryengine.googleapis.com
+   gcloud services enable storage.googleapis.com
+   ```
+
+3. **Check IAM permissions:** Ensure your account has:
+   - Discovery Engine Admin or Editor role
+   - Storage Admin role (for Cloud Storage operations)
+
+#### 3. Import/Upload Failures
+
+**Issue:** Data import fails or documents don't appear in search
+
+**Solutions:**
+
+1. **Use Cloud Storage import (recommended):**
+   ```bash
+   # Upload first
+   vertex-search --config my_config.json datastore upload-gcs data.json bucket-name --create-bucket
+   # Then import
+   vertex-search --config my_config.json datastore import-gcs datastore-id gs://bucket-name/vertex-ai-search/*
+   ```
+
+2. **Verify data format:** Ensure JSON data follows the expected schema
+3. **Check import status:** Use `--wait` flag to wait for completion
+4. **Verify import:** Use `datastore list` to check if documents were imported
+
+#### 4. Search Returns No Results
+
+**Solutions:**
+
+1. **Check data was imported:**
+   ```bash
+   vertex-search --config my_config.json datastore list datastore-id --count 5
+   ```
+
+2. **Verify search engine is properly linked to datastore**
+3. **Try broader search terms**
+4. **Check if facet filters are too restrictive**
+
+#### 5. Configuration File Issues
+
+**Error:** Invalid configuration or missing fields
+
+**Solutions:**
+
+1. **Copy from examples:**
+   ```bash
+   cp examples/config.json my_config.json
+   cp examples/.env.example .env
+   ```
+
+2. **Validate JSON syntax:** Use a JSON validator
+3. **Check required fields:** Ensure all required configuration is present
+
+#### 6. Schema Validation Errors
+
+**Solutions:**
+
+1. **Validate your schema file:** Ensure it's valid JSON Schema format
+2. **Check data matches schema:** Run dataset validation before import
+3. **Use the example schema as reference:** See `examples/drama_shorts_schema.json`
+
 ## Contributing
 
 1. Follow SOLID principles when adding new features
