@@ -27,6 +27,9 @@ dependencies = [
 [project.scripts]
 vertex-search = "vertex_search.cli:main"
 
+[tool.setuptools]
+packages = ["vertex_search"]
+
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["vertex_search*"]
