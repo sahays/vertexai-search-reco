@@ -493,14 +493,46 @@ class SearchManager(SearchManagerInterface):
                     facet_spec = discoveryengine_v1beta.SearchRequest.FacetSpec(
                         facet_key=discoveryengine_v1beta.SearchRequest.FacetSpec.FacetKey(
                             key=facet
-                        )
+                        ),
+                        limit=20,  # Set facet limit between 1-300
+                        excluded_filter_keys=[]
                     )
                     facet_specs.append(facet_spec)
                 search_request.facet_specs = facet_specs
+                logger.info(f"Added facet specs for fields: {', '.join(facets)}")
             
             # Add filter if provided
             if filters:
-                search_request.filter = self._build_filter_string(filters)
+                # Try different filter approaches if the first one fails
+                filter_approaches = [
+                    lambda f: self._build_filter_string_direct(f),  # Direct field names
+                    lambda f: self._build_filter_string(f),        # structData prefix
+                ]
+                
+                for approach in filter_approaches:
+                    try:
+                        filter_string = approach(filters)
+                        search_request.filter = filter_string
+                        logger.info(f"Trying search filter: {filter_string}")
+                        
+                        # Test the filter by doing a quick search
+                        test_request = discoveryengine_v1beta.SearchRequest(
+                            serving_config=serving_config,
+                            query=query,
+                            page_size=1,
+                            filter=filter_string
+                        )
+                        test_response = self.search_client.search(test_request)
+                        
+                        # If we get here, the filter worked
+                        logger.info(f"Filter syntax validated: {filter_string}")
+                        break
+                        
+                    except Exception as filter_error:
+                        logger.warning(f"Filter approach failed: {filter_error}")
+                        if approach == filter_approaches[-1]:  # Last approach
+                            raise SearchError(f"All filter approaches failed. Last error: {filter_error}")
+                        continue
             
             response = self.search_client.search(search_request)
             
@@ -531,6 +563,8 @@ class SearchManager(SearchManagerInterface):
                     'key': facet.key,
                     'values': facet_values
                 })
+            
+            logger.debug(f"Search returned {len(results)} results, {len(facet_results)} facets, total_size: {response.total_size}")
             
             return {
                 'results': results,
@@ -564,19 +598,73 @@ class SearchManager(SearchManagerInterface):
         filter_parts = []
         
         for field, value in filters.items():
-            # Add structData prefix for structured data fields
-            field_path = f"structData.{field}" if not field.startswith("structData.") else field
+            # Try both with and without structData prefix based on import method
+            field_paths = []
+            
+            if field.startswith("structData."):
+                field_paths = [field]
+            else:
+                # Try both direct field name and structData prefixed
+                field_paths = [field, f"structData.{field}"]
+            
+            # Use the first field path (we'll try different approaches)
+            field_path = field_paths[0]  # Start with direct field name
             
             if isinstance(value, str):
-                filter_parts.append(f'{field_path}: ANY("{value}")')
+                # Escape quotes in the value
+                escaped_value = value.replace('"', '\\"')
+                filter_parts.append(f'{field_path}: ANY("{escaped_value}")')
             elif isinstance(value, (int, float)):
                 filter_parts.append(f'{field_path} = {value}')
             elif isinstance(value, list):
-                # Use ANY() with comma-separated values
-                value_strs = [f'"{v}"' if isinstance(v, str) else str(v) for v in value]
+                # Handle list values - each item in ANY() needs to be quoted if string
+                if not value:  # Skip empty lists
+                    continue
+                value_strs = []
+                for v in value:
+                    if isinstance(v, str):
+                        escaped_v = v.replace('"', '\\"')
+                        value_strs.append(f'"{escaped_v}"')
+                    else:
+                        value_strs.append(str(v))
                 filter_parts.append(f'{field_path}: ANY({", ".join(value_strs)})')
+            elif isinstance(value, bool):
+                filter_parts.append(f'{field_path} = {str(value).lower()}')
         
-        return " AND ".join(filter_parts)
+        result = " AND ".join(filter_parts)
+        logger.debug(f"Built filter string: {result}")
+        return result
+    
+    def _build_filter_string_direct(self, filters: Dict[str, Any]) -> str:
+        """Build filter string using direct field names (without structData prefix)."""
+        filter_parts = []
+        
+        for field, value in filters.items():
+            # Use field name directly without prefix
+            field_path = field
+            
+            if isinstance(value, str):
+                escaped_value = value.replace('"', '\\"')
+                filter_parts.append(f'{field_path}: ANY("{escaped_value}")')
+            elif isinstance(value, (int, float)):
+                filter_parts.append(f'{field_path} = {value}')
+            elif isinstance(value, list):
+                if not value:
+                    continue
+                value_strs = []
+                for v in value:
+                    if isinstance(v, str):
+                        escaped_v = v.replace('"', '\\"')
+                        value_strs.append(f'"{escaped_v}"')
+                    else:
+                        value_strs.append(str(v))
+                filter_parts.append(f'{field_path}: ANY({", ".join(value_strs)})')
+            elif isinstance(value, bool):
+                filter_parts.append(f'{field_path} = {str(value).lower()}')
+        
+        result = " AND ".join(filter_parts)
+        logger.debug(f"Built direct filter string: {result}")
+        return result
 
 
 class AutocompleteManager(AutocompleteManagerInterface):
