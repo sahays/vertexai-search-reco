@@ -119,14 +119,14 @@ vertex-search --config my_config.json datastore list my-datastore --count 5
 # Basic search
 vertex-search --config my_config.json search query "romantic drama" --engine-id my-engine
 
-# Search with filters
-vertex-search --config my_config.json search query "love story" --engine-id my-engine --filters '{"genre": ["romantic_drama"]}'
+# Search with filters and facets
+vertex-search --config my_config.json search query "love story" --engine-id my-engine --filters '{"genre": ["romantic_drama"]}' --facets "genre,content_type"
 
 # Get autocomplete suggestions
 vertex-search --config my_config.json autocomplete suggest "rom" --engine-id my-engine
 
 # Get recommendations
-vertex-search --config my_config.json recommend get --user-id user123 --event-type view --engine-id my-engine
+vertex-search --config my_config.json recommend get --user-id user123 --event-type view --document-ids "doc1,doc2" --engine-id my-engine
 ```
 
 ## Import Methods Comparison
@@ -273,7 +273,159 @@ vertex-search --config <config_file> autocomplete suggest <query> [--engine-id <
 
 ```bash
 # Get recommendations
-vertex-search --config <config_file> recommend get --user-id <id> [--event-type view] [--engine-id <id>]
+vertex-search --config <config_file> recommend get --user-id <id> [--event-type view] [--document-ids <id1,id2>] [--engine-id <id>] [--max-results 10]
+```
+
+**Examples:**
+```bash
+# Get recommendations for a user who viewed specific documents
+vertex-search --config my_config.json recommend get --user-id user123 --event-type view --document-ids "doc1,doc2,doc3" --engine-id my-engine --max-results 5
+
+# Get recommendations based on purchase event
+vertex-search --config my_config.json recommend get --user-id user456 --event-type purchase --document-ids "product-123" --engine-id my-engine
+```
+
+## Advanced Search Features
+
+### Autocomplete and Search Suggestions
+
+The autocomplete functionality provides intelligent query suggestions based on your indexed content:
+
+```bash
+# Basic autocomplete - get suggestions for partial queries
+vertex-search --config my_config.json autocomplete suggest "rom" --engine-id my-engine
+# Returns: ["romantic", "romantic comedy", "romance", "romantic drama"]
+
+# Autocomplete for specific domains
+vertex-search --config my_config.json autocomplete suggest "fam" --engine-id my-engine  
+# Returns: ["family", "family drama", "family comedy"]
+
+# Autocomplete works with multi-word queries
+vertex-search --config my_config.json autocomplete suggest "psychological thr" --engine-id my-engine
+# Returns: ["psychological thriller"]
+```
+
+**Frontend Integration Pattern:**
+```javascript
+// Example: Real-time search suggestions in JavaScript
+async function getSuggestions(query) {
+  const response = await fetch(`/api/autocomplete?q=${encodeURIComponent(query)}`);
+  return await response.json();
+}
+
+// Debounced search input handler
+let searchTimeout;
+document.getElementById('search-input').addEventListener('input', (e) => {
+  clearTimeout(searchTimeout);
+  searchTimeout = setTimeout(() => {
+    getSuggestions(e.target.value).then(suggestions => {
+      // Display suggestions in dropdown
+      showSuggestions(suggestions);
+    });
+  }, 300);
+});
+```
+
+### Recommendations and Personalization
+
+Build personalized user experiences with the recommendation system:
+
+```bash
+# Get recommendations based on user viewing history
+vertex-search --config my_config.json recommend get \
+  --user-id user123 \
+  --event-type view \
+  --document-ids "drama-short-001,drama-short-025" \
+  --engine-id my-engine \
+  --max-results 10
+
+# Get recommendations for different event types
+vertex-search --config my_config.json recommend get \
+  --user-id user456 \
+  --event-type purchase \
+  --document-ids "premium-drama-005" \
+  --engine-id my-engine \
+  --max-results 5
+
+# Get recommendations for users who liked specific content
+vertex-search --config my_config.json recommend get \
+  --user-id user789 \
+  --event-type like \
+  --document-ids "comedy-drama-012,teen-drama-008" \
+  --engine-id my-engine \
+  --max-results 8
+```
+
+**Recommendation Event Types:**
+- `view` - User viewed/watched content
+- `purchase` - User purchased/subscribed to content  
+- `like` - User liked/favorited content
+- `share` - User shared content
+- `click` - User clicked on content
+- `add-to-cart` - User added to cart/watchlist
+- `search` - User searched for content
+
+**Building User Profiles:**
+```bash
+# Example: Track user interactions for better recommendations
+
+# User viewed a romantic drama
+vertex-search --config my_config.json recommend record \
+  --user-id user123 \
+  --event-type view \
+  --document-id "romantic-drama-015" \
+  --engine-id my-engine
+
+# User purchased premium content
+vertex-search --config my_config.json recommend record \
+  --user-id user123 \
+  --event-type purchase \
+  --document-id "premium-series-001" \
+  --engine-id my-engine
+
+# Now get personalized recommendations
+vertex-search --config my_config.json recommend get \
+  --user-id user123 \
+  --event-type view \
+  --engine-id my-engine
+```
+
+### Advanced Search with Filters and Facets
+
+Combine search, filters, and facets for powerful discovery experiences:
+
+```bash
+# Search with multiple filters
+vertex-search --config my_config.json search query "family story" \
+  --engine-id my-engine \
+  --filters '{"genre": ["family_drama"], "duration_seconds": 120, "content_type": "custom"}' \
+  --facets "genre,content_type,language" \
+  --page-size 20
+
+# Search for content in specific language with rating filter
+vertex-search --config my_config.json search query "mystery" \
+  --engine-id my-engine \
+  --filters '{"language": "en", "rating.mpaa_rating": ["PG", "PG-13"]}' \
+  --facets "genre,rating.mpaa_rating"
+
+# Search recent content with creator filter
+vertex-search --config my_config.json search query "thriller" \
+  --engine-id my-engine \
+  --filters '{"creator_info.creator_type": "studio", "created_at": "2024-01-01"}' \
+  --facets "creator_info.creator_type,genre"
+```
+
+**Filter Syntax Examples:**
+```json
+{
+  "genre": ["romantic_drama", "family_drama"],           // Array values (OR logic)
+  "content_type": "custom",                              // String value
+  "duration_seconds": 120,                               // Numeric value  
+  "language": "en",                                      // String exact match
+  "rating.mpaa_rating": ["PG", "PG-13"],               // Nested field array
+  "creator_info.verified": true,                         // Boolean value
+  "audience_metrics.view_count": 1000                    // Nested numeric field
+}
 ```
 
 ## Integration with Frontend Applications
@@ -283,22 +435,56 @@ The CLI is designed for easy integration with web applications:
 ### Python Integration
 
 ```python
+from pathlib import Path
 from vertex_search.config import AppConfig, ConfigManager
-from vertex_search.managers import SearchManager
+from vertex_search.managers import (
+    SearchManager, 
+    AutocompleteManager, 
+    RecommendationManager
+)
 
 # Load configuration
 config = AppConfig.from_env(schema_file=Path(\"your_schema.json\"))
 config_manager = ConfigManager(config)
 
-# Create search manager
+# Create managers
 search_manager = SearchManager(config_manager)
+autocomplete_manager = AutocompleteManager(config_manager)
+recommendation_manager = RecommendationManager(config_manager)
 
-# Perform search
+# Perform search with filters and facets
 results = search_manager.search(
-    query=\"user query\",
+    query=\"romantic drama\",
     engine_id=\"your-engine\",
-    filters={\"category\": \"videos\"},
+    filters={\"genre\": [\"romantic_drama\"], \"content_type\": \"custom\"},
+    facets=[\"genre\", \"content_type\", \"language\"],
     page_size=20
+)
+
+# Get autocomplete suggestions
+suggestions = autocomplete_manager.get_suggestions(
+    query=\"rom\",
+    engine_id=\"your-engine\"
+)
+
+# Get personalized recommendations
+user_event = {
+    'eventType': 'view',
+    'userPseudoId': 'user123',
+    'documents': ['doc1', 'doc2', 'doc3']
+}
+recommendations = recommendation_manager.get_recommendations(
+    user_event=user_event,
+    engine_id=\"your-engine\", 
+    max_results=10
+)
+
+# Record user interactions for better future recommendations
+recommendation_manager.record_user_event(
+    event_type=\"view\",
+    user_pseudo_id=\"user123\",
+    documents=[\"doc1\"],
+    engine_id=\"your-engine\"
 )
 ```
 
@@ -307,16 +493,92 @@ results = search_manager.search(
 You can easily wrap the managers in a REST API using FastAPI, Flask, or Django:
 
 ```python
-from fastapi import FastAPI
-from vertex_search.managers import SearchManager
+import json
+from typing import Optional
+from fastapi import FastAPI, Query
+from vertex_search.managers import (
+    SearchManager, 
+    AutocompleteManager, 
+    RecommendationManager
+)
 
 app = FastAPI()
 
+# Initialize managers (do this once at startup)
+# search_manager = SearchManager(config_manager)  
+# autocomplete_manager = AutocompleteManager(config_manager)
+# recommendation_manager = RecommendationManager(config_manager)
+
 @app.get(\"/search\")
-async def search(q: str, filters: str = None):
-    # Use SearchManager to handle the request
-    results = search_manager.search(query=q, filters=json.loads(filters or \"{}\"))
+async def search(
+    q: str,
+    engine_id: str,
+    filters: Optional[str] = None,
+    facets: Optional[str] = None,
+    page_size: int = 10
+):
+    \"\"\"Perform search with optional filters and facets.\"\"\"
+    results = search_manager.search(
+        query=q,
+        engine_id=engine_id,
+        filters=json.loads(filters) if filters else None,
+        facets=facets.split(',') if facets else None,
+        page_size=page_size
+    )
     return results
+
+@app.get(\"/autocomplete\")
+async def autocomplete(q: str, engine_id: str):
+    \"\"\"Get autocomplete suggestions.\"\"\"
+    suggestions = autocomplete_manager.get_suggestions(
+        query=q,
+        engine_id=engine_id
+    )
+    return {\"suggestions\": suggestions}
+
+@app.get(\"/recommendations\") 
+async def get_recommendations(
+    user_id: str,
+    engine_id: str,
+    event_type: str = \"view\",
+    document_ids: Optional[str] = None,
+    max_results: int = 10
+):
+    \"\"\"Get personalized recommendations for a user.\"\"\"
+    user_event = {
+        'eventType': event_type,
+        'userPseudoId': user_id,
+        'documents': document_ids.split(',') if document_ids else []
+    }
+    
+    recommendations = recommendation_manager.get_recommendations(
+        user_event=user_event,
+        engine_id=engine_id,
+        max_results=max_results
+    )
+    return {\"recommendations\": recommendations}
+
+@app.post(\"/events\")
+async def record_event(
+    user_id: str,
+    event_type: str,
+    document_id: str,
+    engine_id: str
+):
+    \"\"\"Record a user interaction event.\"\"\"
+    success = recommendation_manager.record_user_event(
+        event_type=event_type,
+        user_pseudo_id=user_id,
+        documents=[document_id],
+        engine_id=engine_id
+    )
+    return {\"success\": success}
+
+# Example usage:
+# GET /search?q=romantic%20drama&engine_id=my-engine&filters={\"genre\":[\"romantic_drama\"]}
+# GET /autocomplete?q=rom&engine_id=my-engine  
+# GET /recommendations?user_id=user123&engine_id=my-engine&event_type=view&document_ids=doc1,doc2
+# POST /events?user_id=user123&event_type=view&document_id=doc1&engine_id=my-engine
 ```
 
 ## Authentication

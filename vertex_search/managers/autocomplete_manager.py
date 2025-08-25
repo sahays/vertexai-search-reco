@@ -34,26 +34,61 @@ class AutocompleteManager(AutocompleteManagerInterface):
         self, 
         query: str, 
         engine_id: str,
-        suggestion_types: Optional[List[str]] = None
+        suggestion_types: Optional[List[str]] = None,
+        max_suggestions: int = 10
     ) -> List[str]:
         """Get autocomplete suggestions for a query."""
         try:
-            # CompleteQueryRequest uses data_store, not parent or engine
+            # Autocomplete uses data store, not engine - use configured data_store_id
             data_store = f"projects/{self.config_manager.vertex_ai.project_id}/locations/{self.config_manager.vertex_ai.location}/collections/default_collection/dataStores/{self.config_manager.vertex_ai.data_store_id}"
+            logger.info(f"Using data store for autocomplete: {data_store}")
             
-            request = discoveryengine_v1beta.CompleteQueryRequest(
-                data_store=data_store,
-                query=query,
-                include_tail_suggestions=True
-            )
+            # Try with query_model parameter first
+            try:
+                request = discoveryengine_v1beta.CompleteQueryRequest(
+                    data_store=data_store,
+                    query=query,
+                    query_model="document-completable",  # Try document model first
+                    user_pseudo_id="",  # Optional: can be used for personalization
+                    include_tail_suggestions=True
+                )
+                
+                response = self.completion_client.complete_query(request)
+                
+                suggestions = []
+                for suggestion in response.query_suggestions:
+                    suggestions.append(suggestion.suggestion)
+                
+                if suggestions:  # Return if we get results
+                    logger.info(f"Found {len(suggestions)} autocomplete suggestions")
+                    return suggestions[:max_suggestions]
+                
+            except Exception as model_error:
+                logger.warning(f"Autocomplete with query_model failed: {model_error}")
             
-            response = self.completion_client.complete_query(request)
+            # Try without query_model parameter as fallback
+            try:
+                request = discoveryengine_v1beta.CompleteQueryRequest(
+                    data_store=data_store,
+                    query=query,
+                    include_tail_suggestions=True
+                )
+                
+                response = self.completion_client.complete_query(request)
+                suggestions = [suggestion.suggestion for suggestion in response.query_suggestions]
+                
+                if suggestions:
+                    logger.info(f"Found {len(suggestions)} autocomplete suggestions (fallback method)")
+                    return suggestions[:max_suggestions]
             
-            suggestions = []
-            for suggestion in response.query_suggestions:
-                suggestions.append(suggestion.suggestion)
+            except Exception as fallback_error:
+                logger.warning(f"Fallback autocomplete approach failed: {fallback_error}")
             
-            return suggestions
+            logger.info("No autocomplete suggestions available - this is normal if:")
+            logger.info("1. Data was recently imported (autocomplete needs 1-2 days to train)")
+            logger.info("2. There's insufficient search traffic to generate suggestions")
+            logger.info("3. The query doesn't match existing content patterns")
+            return []
             
         except Exception as e:
             logger.error(f"Failed to get suggestions: {str(e)}")
