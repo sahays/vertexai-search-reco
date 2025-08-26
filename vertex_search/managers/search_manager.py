@@ -33,7 +33,7 @@ class SearchManager(SearchManagerInterface):
         self.search_client = discoveryengine_v1beta.SearchServiceClient(**client_kwargs)
     
     @handle_vertex_ai_error
-    def create_search_engine(self, engine_id: str, display_name: str, data_store_ids: List[str]) -> bool:
+    def create_search_engine(self, engine_id: str, display_name: str, data_store_ids: List[str], solution_type: str = "SEARCH") -> bool:
         """Create a search engine connected to data stores."""
         try:
             parent = f"projects/{self.config_manager.vertex_ai.project_id}/locations/{self.config_manager.vertex_ai.location}/collections/default_collection"
@@ -41,9 +41,6 @@ class SearchManager(SearchManagerInterface):
             # Build data store IDs list - use just the data store IDs, not full names
             # The API expects just the data store IDs, not full resource names
             data_store_ids_list = list(data_store_ids)
-            
-            # Create search engine config (simplified structure)
-            search_config = discoveryengine_v1beta.Engine.SearchEngineConfig()
             
             # Get industry vertical from config
             vertical_mapping = {
@@ -57,13 +54,25 @@ class SearchManager(SearchManagerInterface):
                 discoveryengine_v1beta.IndustryVertical.GENERIC
             )
             
-            engine = discoveryengine_v1beta.Engine(
-                display_name=display_name,
-                solution_type=discoveryengine_v1beta.SolutionType.SOLUTION_TYPE_SEARCH,
-                industry_vertical=industry_vertical,
-                data_store_ids=data_store_ids_list,
-                search_engine_config=search_config
-            )
+            # Configure engine based on solution type
+            if solution_type.upper() == "RECOMMENDATION":
+                # For recommendation engines
+                engine = discoveryengine_v1beta.Engine(
+                    display_name=display_name,
+                    solution_type=discoveryengine_v1beta.SolutionType.SOLUTION_TYPE_RECOMMENDATION,
+                    industry_vertical=industry_vertical,
+                    data_store_ids=data_store_ids_list
+                )
+            else:
+                # For search engines
+                search_config = discoveryengine_v1beta.Engine.SearchEngineConfig()
+                engine = discoveryengine_v1beta.Engine(
+                    display_name=display_name,
+                    solution_type=discoveryengine_v1beta.SolutionType.SOLUTION_TYPE_SEARCH,
+                    industry_vertical=industry_vertical,
+                    data_store_ids=data_store_ids_list,
+                    search_engine_config=search_config
+                )
             
             operation = self.engine_client.create_engine(
                 parent=parent,

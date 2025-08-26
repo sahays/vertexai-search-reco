@@ -47,7 +47,7 @@ class RecommendationManager(RecommendationManagerInterface):
             request = discoveryengine_v1beta.RecommendRequest(
                 serving_config=parent,
                 user_event=discoveryengine_v1beta.UserEvent(
-                    event_type=user_event.get('eventType', 'view'),
+                    event_type=user_event.get('eventType', 'media-play'),
                     user_pseudo_id=user_event.get('userPseudoId', ''),
                     documents=[
                         discoveryengine_v1beta.DocumentInfo(id=doc_id) 
@@ -89,12 +89,14 @@ class RecommendationManager(RecommendationManagerInterface):
         event_type: str,
         user_pseudo_id: str,
         documents: List[str],
-        engine_id: str,
-        additional_info: Optional[Dict[str, Any]] = None
+        data_store_id: str,
+        additional_info: Optional[Dict[str, Any]] = None,
+        media_progress_duration: Optional[float] = None,
+        media_progress_percentage: Optional[float] = None
     ) -> bool:
         """Record a user event for recommendation training."""
         try:
-            parent = f"projects/{self.config_manager.vertex_ai.project_id}/locations/{self.config_manager.vertex_ai.location}/collections/default_collection/dataStores/{engine_id}"
+            parent = f"projects/{self.config_manager.vertex_ai.project_id}/locations/{self.config_manager.vertex_ai.location}/collections/default_collection/dataStores/{data_store_id}"
             
             user_event = discoveryengine_v1beta.UserEvent(
                 event_type=event_type,
@@ -105,14 +107,44 @@ class RecommendationManager(RecommendationManagerInterface):
                 ]
             )
             
+            # Add media info for media events that require it
+            if event_type in ['media-complete', 'media-progress'] or media_progress_duration is not None or media_progress_percentage is not None:
+                from google.protobuf import duration_pb2
+                media_info = discoveryengine_v1beta.MediaInfo()
+                
+                if media_progress_duration is not None:
+                    # Convert to Google Duration format
+                    duration = duration_pb2.Duration()
+                    duration.seconds = int(media_progress_duration)
+                    duration.nanos = int((media_progress_duration % 1) * 1e9)
+                    media_info.media_progress_duration = duration
+                elif event_type == 'media-complete':
+                    # For complete events, assume 100% completion if not specified
+                    duration = duration_pb2.Duration()
+                    duration.seconds = 0  # Will be set by the service if not provided
+                    media_info.media_progress_duration = duration
+                
+                if media_progress_percentage is not None:
+                    # Ensure percentage is between 0 and 1 (convert from 0-100 if needed)
+                    if media_progress_percentage > 1.0:
+                        media_progress_percentage = media_progress_percentage / 100.0
+                    media_info.media_progress_percentage = media_progress_percentage
+                elif event_type == 'media-complete':
+                    # For complete events, set to 1.0 (100%) if not specified
+                    media_info.media_progress_percentage = 1.0
+                
+                user_event.media_info = media_info
+            
             # Add additional info if provided
             if additional_info:
                 user_event.attributes.update(additional_info)
             
-            self.user_event_client.write_user_event(
+            request = discoveryengine_v1beta.WriteUserEventRequest(
                 parent=parent,
                 user_event=user_event
             )
+            
+            self.user_event_client.write_user_event(request)
             
             logger.info(f"Recorded user event: {event_type} for user {user_pseudo_id}")
             return True

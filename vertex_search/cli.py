@@ -136,8 +136,9 @@ def datastore(ctx):
 @datastore.command('create')
 @click.argument('data_store_id')
 @click.option('--display-name', help='Display name for the data store')
+@click.option('--solution-type', default='SEARCH', type=click.Choice(['SEARCH', 'RECOMMENDATION']), help='Solution type for the data store')
 @click.pass_context
-def create_datastore(ctx, data_store_id: str, display_name: Optional[str]):
+def create_datastore(ctx, data_store_id: str, display_name: Optional[str], solution_type: str):
     """Create a new data store in Vertex AI."""
     config_manager: ConfigManager = ctx.obj['config_manager']
     asset_manager = MediaAssetManager(config_manager)
@@ -145,11 +146,11 @@ def create_datastore(ctx, data_store_id: str, display_name: Optional[str]):
     display_name = display_name or data_store_id
     
     try:
-        success = asset_manager.create_data_store(data_store_id, display_name)
+        success = asset_manager.create_data_store(data_store_id, display_name, solution_type)
         if success:
-            console.print(f"[green]✓ Data store '{data_store_id}' created successfully[/green]")
+            console.print(f"[green]✓ {solution_type.title()} data store '{data_store_id}' created successfully[/green]")
         else:
-            console.print(f"[red]✗ Failed to create data store '{data_store_id}'[/red]")
+            console.print(f"[red]✗ Failed to create {solution_type.lower()} data store '{data_store_id}'[/red]")
             ctx.exit(1)
     except Exception as e:
         console.print(f"[red]Error: {str(e)}[/red]")
@@ -334,9 +335,10 @@ def search(ctx):
 @search.command('create-engine')
 @click.argument('engine_id')
 @click.argument('data_store_ids', nargs=-1, required=True)
-@click.option('--display-name', help='Display name for the search engine')
+@click.option('--display-name', help='Display name for the engine')
+@click.option('--solution-type', default='SEARCH', type=click.Choice(['SEARCH', 'RECOMMENDATION']), help='Solution type for the engine')
 @click.pass_context
-def create_search_engine(ctx, engine_id: str, data_store_ids: tuple, display_name: Optional[str]):
+def create_search_engine(ctx, engine_id: str, data_store_ids: tuple, display_name: Optional[str], solution_type: str):
     """Create a search engine connected to data stores."""
     config_manager: ConfigManager = ctx.obj['config_manager']
     search_manager = SearchManager(config_manager)
@@ -344,11 +346,11 @@ def create_search_engine(ctx, engine_id: str, data_store_ids: tuple, display_nam
     display_name = display_name or engine_id
     
     try:
-        success = search_manager.create_search_engine(engine_id, display_name, list(data_store_ids))
+        success = search_manager.create_search_engine(engine_id, display_name, list(data_store_ids), solution_type)
         if success:
-            console.print(f"[green]✓ Search engine '{engine_id}' created successfully[/green]")
+            console.print(f"[green]✓ {solution_type.title()} engine '{engine_id}' created successfully[/green]")
         else:
-            console.print(f"[red]✗ Failed to create search engine '{engine_id}'[/red]")
+            console.print(f"[red]✗ Failed to create {solution_type.lower()} engine '{engine_id}'[/red]")
             ctx.exit(1)
     except Exception as e:
         console.print(f"[red]Error: {str(e)}[/red]")
@@ -502,6 +504,44 @@ def get_recommendations(ctx, user_id: str, event_type: str, document_ids: Option
             console.print(table)
         else:
             console.print("No recommendations found")
+            
+    except Exception as e:
+        console.print(f"[red]Error: {str(e)}[/red]")
+        ctx.exit(1)
+
+
+@recommend.command('record')
+@click.option('--user-id', required=True, help='User pseudo ID')
+@click.option('--event-type', required=True, help='Event type (media-play, media-complete, view-item, search, view-home-page)')
+@click.option('--document-id', required=True, help='Document ID')
+@click.option('--data-store-id', help='Data store ID (for recommendation data store)')
+@click.option('--media-progress-duration', type=float, help='Media progress duration in seconds (for media-complete events)')
+@click.option('--media-progress-percentage', type=float, help='Media progress percentage (0.0-1.0 or 0-100, for media-complete events)')
+@click.pass_context
+def record_event(ctx, user_id: str, event_type: str, document_id: str, data_store_id: Optional[str], 
+                 media_progress_duration: Optional[float], media_progress_percentage: Optional[float]):
+    """Record a user event for recommendation training."""
+    config_manager: ConfigManager = ctx.obj['config_manager']
+    recommendation_manager = RecommendationManager(config_manager)
+    
+    # Use configured data_store_id if not provided
+    data_store_id = data_store_id or getattr(config_manager.config.vertex_ai, 'recommendation_data_store_id', config_manager.config.vertex_ai.data_store_id)
+    
+    try:
+        success = recommendation_manager.record_user_event(
+            event_type=event_type,
+            user_pseudo_id=user_id,
+            documents=[document_id],
+            data_store_id=data_store_id,
+            media_progress_duration=media_progress_duration,
+            media_progress_percentage=media_progress_percentage
+        )
+        
+        if success:
+            console.print(f"[green]✓ User event recorded: {event_type} for user {user_id} on document {document_id}[/green]")
+        else:
+            console.print(f"[red]✗ Failed to record user event[/red]")
+            ctx.exit(1)
             
     except Exception as e:
         console.print(f"[red]Error: {str(e)}[/red]")

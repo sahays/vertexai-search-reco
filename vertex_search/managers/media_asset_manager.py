@@ -42,7 +42,7 @@ class MediaAssetManager(MediaAssetManagerInterface):
         self.storage_client = storage.Client(**storage_kwargs)
         
     @handle_vertex_ai_error
-    def create_data_store(self, data_store_id: str, display_name: str) -> bool:
+    def create_data_store(self, data_store_id: str, display_name: str, solution_type: str = "SEARCH") -> bool:
         """Create a new data store in Vertex AI."""
         try:
             parent = f"projects/{self.config_manager.vertex_ai.project_id}/locations/{self.config_manager.vertex_ai.location}/collections/default_collection"
@@ -59,10 +59,16 @@ class MediaAssetManager(MediaAssetManagerInterface):
                 discoveryengine_v1beta.IndustryVertical.GENERIC
             )
             
+            # Determine solution type
+            if solution_type.upper() == "RECOMMENDATION":
+                solution_types = [discoveryengine_v1beta.SolutionType.SOLUTION_TYPE_RECOMMENDATION]
+            else:
+                solution_types = [discoveryengine_v1beta.SolutionType.SOLUTION_TYPE_SEARCH]
+            
             data_store = discoveryengine_v1beta.DataStore(
                 display_name=display_name,
                 industry_vertical=industry_vertical,
-                solution_types=[discoveryengine_v1beta.SolutionType.SOLUTION_TYPE_SEARCH],
+                solution_types=solution_types,
                 content_config=discoveryengine_v1beta.DataStore.ContentConfig.NO_CONTENT
             )
             

@@ -1,7 +1,7 @@
-# Vertex AI Search for Media
+# Vertex AI Search and Recommendations for Media
 
-A schema-agnostic CLI tool for creating, indexing, and searching media datasets using Google Cloud Vertex AI Search.
-Designed for easy integration with any frontend application.
+A schema-agnostic CLI tool for creating, indexing, and searching media datasets using Google Cloud Vertex AI Search and
+Recommendations for Media. Designed for easy integration with any frontend application.
 
 ## Features
 
@@ -12,7 +12,19 @@ Designed for easy integration with any frontend application.
 - **Sample Data Generation**: Automatic generation of realistic sample data based on your schema
 - **Flexible Configuration**: Support for both config files and environment variables
 
-## Quick Start
+## Table of Contents
+
+1. [Environment Setup](#environment-setup)
+2. [Data Preparation](#data-preparation)
+3. [Search Workflow](#search-workflow)
+4. [Autocomplete Workflow](#autocomplete-workflow)
+5. [Recommendations Workflow](#recommendations-workflow)
+6. [Troubleshooting](#troubleshooting)
+7. [CLI Reference](#cli-reference)
+8. [Frontend Integration](#frontend-integration)
+9. [Architecture](#architecture)
+
+## Environment Setup
 
 ### 1. Installation
 
@@ -28,188 +40,686 @@ pip install -r requirements.txt
 pip install -e .
 ```
 
-### 2. Setup Google Cloud
+### 2. Google Cloud Prerequisites
 
-1. Create a Google Cloud Project
-2. Enable the Discovery Engine API
-3. Choose an authentication method:
+Before starting, ensure you have:
 
-**Option A: Application Default Credentials (Recommended)**
+1. **Google Cloud Project**: Create a new project or use an existing one
+2. **Enable Required APIs**:
+   ```bash
+   gcloud services enable discoveryengine.googleapis.com
+   gcloud services enable storage.googleapis.com
+   ```
+3. **IAM Permissions**: Your account needs:
+   - Discovery Engine Admin or Editor role
+   - Storage Admin role (for Cloud Storage operations)
+
+### 3. Authentication Setup
+
+Choose one of the following authentication methods:
+
+#### Option A: Application Default Credentials (Recommended)
 
 ```bash
-# Use gcloud CLI authentication
+# Authenticate with gcloud
 gcloud auth application-default login
 export VERTEX_PROJECT_ID="your-gcp-project-id"
+export VERTEX_LOCATION="global"
 ```
 
-**Option B: Service Account Key File**
+#### Option B: Service Account Key File
 
 ```bash
-# Create a service account and download the JSON key
+# Create service account and download JSON key
 export GOOGLE_APPLICATION_CREDENTIALS="path/to/your/service-account-key.json"
 export VERTEX_PROJECT_ID="your-gcp-project-id"
+export VERTEX_LOCATION="global"
 ```
 
-**Note**: API keys are not supported by the Discovery Engine API. You must use OAuth2 credentials (gcloud auth or
-service account).
+**Note**: API keys are not supported by the Discovery Engine API. You must use OAuth2 credentials.
 
-### 3. Configuration
+### 4. Configuration Files
 
-Copy the example configuration:
+Copy and customize the example configuration files:
 
 ```bash
 cp examples/.env.example .env
 cp examples/config.json my_config.json
 ```
 
-Edit the configuration files with your project details:
+Edit `.env` with your project details:
 
 ```bash
-# .env - Using Application Default Credentials (recommended)
+# .env
 VERTEX_PROJECT_ID=your-gcp-project-id
 VERTEX_LOCATION=global
 ```
 
-**Important**: Make sure to:
+Edit `my_config.json` for advanced configuration:
 
-1. Enable the Discovery Engine API: `gcloud services enable discoveryengine.googleapis.com`
-2. Set up proper IAM permissions (Discovery Engine Admin/Editor role)
-3. Run `gcloud auth application-default login` for authentication
+```json
+{
+	"vertex_ai": {
+		"project_id": "your-project-id",
+		"location": "global"
+	},
+	"schema": {
+		"schema_file": "your_schema.json",
+		"searchable_fields": ["title", "description"],
+		"filterable_fields": ["genre", "language"],
+		"facetable_fields": ["genre", "content_type"]
+	}
+}
+```
 
-### 4. Generate Sample Data
+## Data Preparation
+
+### Option 1: Generate Sample Data
+
+For testing and development, generate realistic sample data:
 
 ```bash
-# Generate 1000 sample records using the example schema
+# Generate sample data using the example schema
 python generate_sample_data.py
+
+# Or generate custom amount
+vertex-search --config my_config.json dataset generate --count 1000 --output sample_data.json
 ```
 
-### 5. Create Data Store and Search Engine
+### Option 2: Bring Your Own Data
 
-```bash
-# Create data store
-vertex-search --config my_config.json datastore create my-datastore --display-name "My Media Store"
+Prepare your own JSON data file following these requirements:
 
-# Create search engine
-vertex-search --config my_config.json search create-engine my-engine my-datastore --display-name "My Search Engine"
+1. **JSON Format**: Each record should be a valid JSON object
+2. **Required Fields**: Must include `id` and at least one searchable field
+3. **Schema Compliance**: Data should match your defined JSON schema
+
+**Example data structure:**
+
+```json
+[
+	{
+		"id": "doc1",
+		"title": "Sample Movie",
+		"description": "A great movie about...",
+		"genre": ["action", "adventure"],
+		"language": "en"
+	}
+]
 ```
 
-### 6. Upload and Import Data (Cloud Storage Approach - Recommended)
+### Custom Schema Setup
+
+To use your own content schema:
+
+1. **Create Schema File**: Define your JSON schema in a `.json` file
+2. **Configure Field Mappings**: Update config to specify searchable, filterable, and facetable fields
+3. **Validate Data**: Ensure your data matches the schema structure
+
+```json
+{
+	"$schema": "http://json-schema.org/draft-07/schema#",
+	"title": "Your Content Schema",
+	"type": "object",
+	"required": ["id", "title"],
+	"properties": {
+		"id": { "type": "string" },
+		"title": { "type": "string" },
+		"your_custom_fields": { "type": "string" }
+	}
+}
+```
+
+## Search Workflow
+
+The search workflow enables query-based content discovery with advanced filtering and faceting capabilities.
+
+### Step 1: Create Search Infrastructure
 
 ```bash
-# Step 1: Upload data to Cloud Storage
+# Create search data store
+vertex-search --config my_config.json datastore create my-datastore --display-name "My Search Store" --solution-type SEARCH
+
+# Upload data to Cloud Storage (recommended approach)
 vertex-search --config my_config.json datastore upload-gcs examples/sample_data.json your-bucket-name --create-bucket --folder vertex-ai-search
 
-# Step 2: Import from Cloud Storage to Vertex AI
+# Import data from Cloud Storage
 vertex-search --config my_config.json datastore import-gcs my-datastore gs://your-bucket-name/vertex-ai-search/* --wait
 
-# Step 3: Verify documents were imported
+# Create search engine
+vertex-search --config my_config.json search create-engine my-engine my-datastore --display-name "My Search Engine" --solution-type SEARCH
+```
+
+### Step 2: Verify Setup
+
+```bash
+# Verify documents were imported
 vertex-search --config my_config.json datastore list my-datastore --count 5
 ```
 
-**Why Cloud Storage?**
-- ✅ **Full Console Visibility**: See your data in GCP Console
-- ✅ **Better Reliability**: More stable than inline import
-- ✅ **Easy Debugging**: Files visible in Cloud Storage
-- ✅ **Source of Truth**: Files remain for re-import if needed
-- ✅ **Correct Document Format**: Uses proper Vertex AI Document schema with `structData`
+### Step 3: Perform Searches
 
-### 7. Search Your Content
+#### Basic Search
 
 ```bash
-# Basic search
+# Simple text search
 vertex-search --config my_config.json search query "romantic drama" --engine-id my-engine
 
-# Search with filters and facets
-vertex-search --config my_config.json search query "love story" --engine-id my-engine --filters '{"genre": ["romantic_drama"]}' --facets "genre,content_type"
+# Search specific fields
+vertex-search --config my_config.json search query "family story" --engine-id my-engine
+```
 
-# Get autocomplete suggestions
+#### Advanced Search with Filters
+
+```bash
+# Search with genre filter
+vertex-search --config my_config.json search query "love story" \
+  --engine-id my-engine \
+  --filters '{"genre": ["romantic_drama", "family_drama"]}'
+
+# Search with multiple filters
+vertex-search --config my_config.json search query "thriller" \
+  --engine-id my-engine \
+  --filters '{"genre": ["thriller"], "language": "en", "duration_seconds": 120}'
+```
+
+#### Search with Facets
+
+```bash
+# Get faceted results for better filtering UI
+vertex-search --config my_config.json search query "drama" \
+  --engine-id my-engine \
+  --facets "genre,content_type,language" \
+  --page-size 20
+```
+
+### What to Expect
+
+- **Response Time**: Typically 100-500ms for most queries
+- **Relevance**: AI-powered semantic search with keyword matching
+- **Faceted Results**: Grouped counts for building filter UIs
+- **Pagination**: Support for large result sets
+- **Highlighting**: Search term highlighting in results
+
+### Search Filter Syntax
+
+```json
+{
+	"genre": ["romantic_drama", "family_drama"], // Array values (OR logic)
+	"content_type": "custom", // String exact match
+	"duration_seconds": 120, // Numeric value
+	"rating.mpaa_rating": ["PG", "PG-13"], // Nested field array
+	"creator_info.verified": true, // Boolean value
+	"audience_metrics.view_count": 1000 // Nested numeric field
+}
+```
+
+## Autocomplete Workflow
+
+Autocomplete provides intelligent query suggestions to enhance user search experience.
+
+### How It Works
+
+Vertex AI Search analyzes your indexed content to generate contextually relevant suggestions based on:
+
+- Popular search terms from your data
+- Semantic understanding of content
+- User query patterns
+- Content metadata
+
+### Implementation
+
+#### Basic Autocomplete
+
+```bash
+# Get suggestions for partial queries
 vertex-search --config my_config.json autocomplete suggest "rom" --engine-id my-engine
+# Returns: ["romantic", "romantic comedy", "romance", "romantic drama"]
 
-# Get recommendations
-vertex-search --config my_config.json recommend get --user-id user123 --event-type view --document-ids "doc1,doc2" --engine-id my-engine
+# Domain-specific suggestions
+vertex-search --config my_config.json autocomplete suggest "fam" --engine-id my-engine
+# Returns: ["family", "family drama", "family comedy"]
+
+# Multi-word query completion
+vertex-search --config my_config.json autocomplete suggest "psychological thr" --engine-id my-engine
+# Returns: ["psychological thriller"]
 ```
 
-## Import Methods Comparison
+### Frontend Integration Example
 
-### Cloud Storage Import (Recommended)
-```bash
-# Upload to Cloud Storage first
-vertex-search --config my_config.json datastore upload-gcs data.json bucket-name --create-bucket
-# Then import from Cloud Storage
-vertex-search --config my_config.json datastore import-gcs datastore-id gs://bucket-name/vertex-ai-search/*
-```
-**Pros**: Full console visibility, reliable, easy debugging, source of truth
-**Best for**: Production use, large datasets, when you need to see data in console
-
-### Inline Import (Legacy)
-```bash
-vertex-search --config my_config.json datastore import datastore-id data.json
-```
-**Pros**: Single command
-**Cons**: Limited console visibility, less reliable for large datasets
-**Best for**: Quick testing only
-
-## Architecture
-
-### Core Components
-
-- **DatasetManager**: Schema-agnostic dataset creation and validation
-- **MediaAssetManager**: Vertex AI data store management
-- **SearchManager**: Search engine creation and query execution
-- **AutocompleteManager**: Autocomplete functionality
-- **RecommendationManager**: User event tracking and recommendations
-- **DataGenerator**: Automatic sample data generation from schemas
-
-### Design Principles
-
-- **SOLID Principles**: Single responsibility, open/closed, interface segregation
-- **DRY (Don't Repeat Yourself)**: Reusable components and utilities
-- **Schema Flexibility**: No hardcoded assumptions about data structure
-- **Clean Interfaces**: Easy integration with any frontend framework
-
-## Custom Schema Usage
-
-The system works with any valid JSON schema. Here's how to use your own schema:
-
-### 1. Create Your Schema
-
-```json
-{
-  \"$schema\": \"http://json-schema.org/draft-07/schema#\",
-  \"title\": \"Your Content Schema\",
-  \"type\": \"object\",
-  \"required\": [\"id\", \"title\"],
-  \"properties\": {
-    \"id\": {\"type\": \"string\"},
-    \"title\": {\"type\": \"string\"},
-    \"your_custom_fields\": {\"type\": \"string\"}
-  }
+```javascript
+// Real-time search suggestions
+async function getSuggestions(query) {
+	const response = await fetch(`/api/autocomplete?q=${encodeURIComponent(query)}`);
+	return await response.json();
 }
+
+// Debounced input handler
+let searchTimeout;
+document.getElementById("search-input").addEventListener("input", (e) => {
+	clearTimeout(searchTimeout);
+	searchTimeout = setTimeout(() => {
+		if (e.target.value.length >= 2) {
+			getSuggestions(e.target.value).then((suggestions) => {
+				showSuggestions(suggestions);
+			});
+		}
+	}, 300); // 300ms debounce
+});
 ```
 
-### 2. Configure Field Mappings
+### What to Expect
 
-Update your configuration to specify which fields to use for search operations:
+- **Minimum Query Length**: Suggestions work best with 2+ characters
+- **Response Time**: Usually under 100ms
+- **Relevance**: Context-aware suggestions based on your content
+- **Variety**: Mix of exact matches and semantic suggestions
+- **Real-time**: Updates as you type
 
-```json
-{
-  \"schema\": {
-    \"schema_file\": \"your_schema.json\",
-    \"id_field\": \"id\",
-    \"title_field\": \"title\",
-    \"searchable_fields\": [\"title\", \"description\", \"tags\"],
-    \"filterable_fields\": [\"category\", \"status\", \"date\"],
-    \"facetable_fields\": [\"category\", \"type\"]
-  }
-}
-```
+### Best Practices
 
-### 3. Generate Sample Data
+- Implement debouncing to avoid excessive API calls
+- Show suggestions in a dropdown or overlay
+- Handle keyboard navigation (up/down arrows, enter)
+- Highlight matching characters in suggestions
+- Limit displayed suggestions to 5-10 items
+
+## Recommendations Workflow
+
+The recommendations system provides personalized content suggestions based on user behavior patterns.
+
+### How It Works
+
+Vertex AI Recommendations for Media uses machine learning models specifically optimized for media content to analyze:
+
+- **Media Interactions**: Plays, completions, clicks, likes, shares, bookmarks
+- **Content Relationships**: Similar content based on metadata and user behavior
+- **Collaborative Filtering**: "Users who watched this also enjoyed..."
+- **Behavioral Patterns**: Viewing duration, completion rates, time-based preferences
+
+### Step 1: Create Recommendation Infrastructure
 
 ```bash
-# The data generator will automatically create realistic data based on your schema
-vertex-search --config my_config.json dataset generate --count 1000 --output my_sample_data.json
+# Create recommendation data store (separate from search)
+vertex-search --config my_config.json datastore create my-datastore-reco \
+  --display-name "Recommendation Store" \
+  --solution-type RECOMMENDATION
+
+# Upload same data to recommendation data store
+vertex-search --config my_config.json datastore upload-gcs examples/sample_data.json your-bucket-name --folder vertex-ai-reco
+vertex-search --config my_config.json datastore import-gcs my-datastore-reco gs://your-bucket-name/vertex-ai-reco/* --wait
+
+# Create recommendation engine
+vertex-search --config my_config.json search create-engine my-engine-reco my-datastore-reco \
+  --display-name "Recommendation Engine" \
+  --solution-type RECOMMENDATION
 ```
+
+### Step 2: Record User Interactions
+
+Track user behavior to train the recommendation model:
+
+```bash
+# Record when user starts playing content
+vertex-search --config my_config.json recommend record \
+  --user-id user123 \
+  --event-type media-play \
+  --document-id drama-001 \
+  --data-store-id my-datastore-reco
+
+# Record when user completes watching content (with automatic 100% completion)
+vertex-search --config my_config.json recommend record \
+  --user-id user123 \
+  --event-type media-complete \
+  --document-id comedy-005 \
+  --data-store-id my-datastore-reco
+
+# Record when user completes watching content (with specific duration and percentage)
+vertex-search --config my_config.json recommend record \
+  --user-id user123 \
+  --event-type media-complete \
+  --document-id drama-002 \
+  --data-store-id my-datastore-reco \
+  --media-progress-duration 120.5 \
+  --media-progress-percentage 1.0
+
+# Record partial completion (50% watched)
+vertex-search --config my_config.json recommend record \
+  --user-id user123 \
+  --event-type media-complete \
+  --document-id drama-003 \
+  --data-store-id my-datastore-reco \
+  --media-progress-duration 60.0 \
+  --media-progress-percentage 0.5
+
+# Record when user views content details
+vertex-search --config my_config.json recommend record \
+  --user-id user123 \
+  --event-type view-item \
+  --document-id premium-content-001 \
+  --data-store-id my-datastore-reco
+
+# Record home page view (required for "Recommended for You")
+vertex-search --config my_config.json recommend record \
+  --user-id user123 \
+  --event-type view-home-page \
+  --data-store-id my-datastore-reco
+```
+
+### Step 3: Get Personalized Recommendations
+
+```bash
+# Get recommendations based on viewing history
+vertex-search --config my_config.json recommend get \
+  --user-id user123 \
+  --event-type media-play \
+  --document-ids "drama-001,drama-025" \
+  --engine-id my-engine-reco \
+  --max-results 10
+
+# Get recommendations for new users (cold start)
+vertex-search --config my_config.json recommend get \
+  --user-id new-user456 \
+  --engine-id my-engine-reco \
+  --max-results 5
+```
+
+### Supported Media Event Types
+
+Based on official Google Cloud documentation, these are the supported event types for Vertex AI Recommendations for Media:
+
+#### Core Event Types
+- `view-item` - Views details of a document/media item
+- `view-home-page` - Views home page (required for "Recommended for You" on home page context)
+- `search` - Searches the data store
+- `media-play` - Clicks play on a media item 
+- `media-complete` - Stops playing a media item, signifying the end of watching (requires `mediaProgressDuration`)
+
+#### Event Requirements by Recommendation Type
+
+**Others You May Like:**
+- Click-through rate: `view-item` OR `media-play`
+- Conversion rate: `media-complete` AND (`media-play` OR `view-item`)
+- Watch duration: `media-complete` AND (`media-play` OR `view-item`)
+
+**Recommended for You:**
+- Click-through rate: `view-item`, `media-play`, and `view-home-page` (for home page)
+- Conversion rate: (`media-play` OR `view-item`), `media-complete`, and `view-home-page` (for home page)
+- Watch duration: (`media-play` OR `view-item`), `media-complete`, and `view-home-page` (for home page)
+
+**More Like This:**
+- Click-through rate: `view-item` OR `media-play`
+- Conversion rate: (`media-play` OR `view-item`) AND `media-complete`
+- Watch duration: (`media-play` OR `view-item`) AND `media-complete`
+
+**Most Popular:**
+- Click-through rate: `view-item` OR `media-play`
+- Conversion rate: `media-complete`
+
+### What to Expect
+
+#### Initial Period (0-2 weeks)
+
+- **Cold Start**: Limited personalization for new users
+- **Popular Items**: System recommends generally popular content
+- **Basic Patterns**: Simple content-based recommendations
+
+#### After Training (2+ weeks with data)
+
+- **Personalized Results**: Tailored to individual user preferences
+- **Collaborative Filtering**: "Users like you also enjoyed..."
+- **Sequence Awareness**: Recommendations based on viewing patterns
+- **Improved Accuracy**: Better match to user tastes
+
+#### Performance Characteristics
+
+- **Response Time**: 200-800ms depending on complexity
+- **Freshness**: New interactions reflected within hours
+- **Quality Metrics**: Click-through rates typically improve over time
+- **Scalability**: Handles millions of users and items
+
+### Best Practices
+
+1. **Track Multiple Event Types**: Combine plays, completions, and item views for richer signals
+2. **Handle Cold Start**: Show popular or trending content for new users
+3. **Regular Updates**: Record interactions in real-time or batch uploads
+4. **Track Completion Rates**: Use both `media-play` and `media-complete` to measure engagement
+5. **Monitor Performance**: Track click-through rates and completion rates
+6. **Fallbacks**: Have backup content ready when recommendations aren't available
+
+### Example Implementation Patterns
+
+```python
+# Record when user starts watching content
+def track_media_play(user_id, content_id):
+    recommendation_manager.record_user_event(
+        event_type="media-play",
+        user_pseudo_id=user_id,
+        documents=[content_id],
+        data_store_id="my-datastore-reco"
+    )
+
+# Record when user finishes watching content (automatic 100% completion)
+def track_media_complete(user_id, content_id):
+    recommendation_manager.record_user_event(
+        event_type="media-complete",
+        user_pseudo_id=user_id,
+        documents=[content_id],
+        data_store_id="my-datastore-reco"
+    )
+
+# Record when user finishes watching content with specific progress
+def track_media_complete_with_progress(user_id, content_id, duration_seconds, percentage):
+    recommendation_manager.record_user_event(
+        event_type="media-complete",
+        user_pseudo_id=user_id,
+        documents=[content_id],
+        data_store_id="my-datastore-reco",
+        media_progress_duration=duration_seconds,
+        media_progress_percentage=percentage  # 0.0-1.0 range
+    )
+
+# Get personalized recommendations based on viewing history
+def get_user_recommendations(user_id, recently_played_ids, count=10):
+    user_event = {
+        'eventType': 'media-play',
+        'userPseudoId': user_id,
+        'documents': recently_played_ids
+    }
+
+    return recommendation_manager.get_recommendations(
+        user_event=user_event,
+        engine_id="my-engine-reco",
+        max_results=count
+    )
+```
+
+## Troubleshooting
+
+### Common Issues and Solutions
+
+#### 1. "Project was not passed and could not be determined from the environment"
+
+**Error:**
+
+```
+OSError: Project was not passed and could not be determined from the environment.
+```
+
+**Solution:** This error occurs when the Google Cloud project ID is not properly configured. Fix by:
+
+1. **Set the environment variable:**
+
+   ```bash
+   export VERTEX_PROJECT_ID="your-gcp-project-id"
+   ```
+
+2. **Or set it in your config file:**
+
+   ```json
+   {
+   	"vertex_ai": {
+   		"project_id": "your-gcp-project-id"
+   	}
+   }
+   ```
+
+3. **Or use gcloud default project:**
+   ```bash
+   gcloud config set project your-gcp-project-id
+   ```
+
+#### 2. Authentication Issues
+
+**Error:** Permission denied or authentication failures
+
+**Solutions:**
+
+1. **Use Application Default Credentials (Recommended):**
+
+   ```bash
+   gcloud auth application-default login
+   export VERTEX_PROJECT_ID="your-gcp-project-id"
+   ```
+
+2. **Enable required APIs:**
+
+   ```bash
+   gcloud services enable discoveryengine.googleapis.com
+   gcloud services enable storage.googleapis.com
+   ```
+
+3. **Check IAM permissions:** Ensure your account has:
+   - Discovery Engine Admin or Editor role
+   - Storage Admin role (for Cloud Storage operations)
+
+#### 3. Import/Upload Failures
+
+**Issue:** Data import fails or documents don't appear in search
+
+**Solutions:**
+
+1. **Use Cloud Storage import (recommended):**
+
+   ```bash
+   # Upload first
+   vertex-search --config my_config.json datastore upload-gcs data.json bucket-name --create-bucket
+   # Then import
+   vertex-search --config my_config.json datastore import-gcs datastore-id gs://bucket-name/vertex-ai-search/*
+   ```
+
+2. **Verify data format:** Ensure JSON data follows the expected schema
+3. **Check import status:** Use `--wait` flag to wait for completion
+4. **Verify import:** Use `datastore list` to check if documents were imported
+
+#### 4. Search Returns No Results
+
+**Solutions:**
+
+1. **Check data was imported:**
+
+   ```bash
+   vertex-search --config my_config.json datastore list datastore-id --count 5
+   ```
+
+2. **Verify search engine is properly linked to datastore**
+3. **Try broader search terms**
+4. **Check if facet filters are too restrictive**
+
+#### 5. Configuration File Issues
+
+**Error:** Invalid configuration or missing fields
+
+**Solutions:**
+
+1. **Copy from examples:**
+
+   ```bash
+   cp examples/config.json my_config.json
+   cp examples/.env.example .env
+   ```
+
+2. **Validate JSON syntax:** Use a JSON validator
+3. **Check required fields:** Ensure all required configuration is present
+
+#### 6. Schema Validation Errors
+
+**Solutions:**
+
+1. **Validate your schema file:** Ensure it's valid JSON Schema format
+2. **Check data matches schema:** Run dataset validation before import
+3. **Use the example schema as reference:** See `examples/drama_shorts_schema.json`
+
+#### 7. Recommendations Not Working
+
+**Common Issues:**
+
+1. **No user interactions recorded:**
+
+   ```bash
+   # Record some interactions first using media-specific event types
+   vertex-search --config my_config.json recommend record --user-id user123 --event-type media-play --document-id doc1 --data-store-id my-datastore-reco
+   vertex-search --config my_config.json recommend record --user-id user123 --event-type media-complete --document-id doc1 --data-store-id my-datastore-reco
+   ```
+
+2. **Wrong solution type:** Ensure recommendation datastore and engine use `RECOMMENDATION` solution type
+3. **Insufficient data:** Recommendations need time and data to train (typically 2+ weeks)
+4. **Invalid event types:** Use supported event types like `media-play`, `media-complete`, `view-item`, `search`, `view-home-page`
+5. **Missing media info:** For `media-complete` events, ensure media progress information is included (automatically
+   added if not specified)
+
+#### 8. Autocomplete Not Returning Suggestions
+
+**Solutions:**
+
+1. **Check minimum query length:** Try with 2+ characters
+2. **Verify engine is active:** Ensure search engine is properly created and linked
+3. **Wait for indexing:** New data may take time to be indexed for autocomplete
+
+### Performance Issues
+
+#### Slow Search Response Times
+
+1. **Check query complexity:** Simplify filters and facets
+2. **Optimize data size:** Reduce document size if possible
+3. **Use pagination:** Limit result set size with `--page-size`
+
+#### High API Costs
+
+1. **Implement caching:** Cache frequent queries
+2. **Use autocomplete wisely:** Implement proper debouncing
+3. **Optimize recommendation calls:** Batch user interactions when possible
+
+### Debugging Tips
+
+#### Enable Debug Logging
+
+```python
+from vertex_search.utils import setup_logging
+logger = setup_logging(level="DEBUG", log_file=Path("debug.log"))
+```
+
+#### Check GCP Console
+
+1. **Discovery Engine Console**: View your data stores and engines
+2. **Cloud Storage Console**: Verify uploaded files
+3. **Cloud Logging**: Check for API errors and warnings
+
+#### Validate Data Format
+
+```bash
+# Test with small data file first
+vertex-search --config my_config.json dataset create test_data.json --validate-only
+```
+
+### Getting Help
+
+If you encounter issues not covered here:
+
+1. Check the [examples/](examples/) directory for working configurations
+2. Validate your data against the provided schema
+3. Test with the sample data first to isolate issues
+4. Check Google Cloud Console for detailed error messages
 
 ## CLI Reference
 
@@ -228,13 +738,16 @@ vertex-search --config <config_file> dataset generate [--count 1000] [--output f
 ### Data Store Commands
 
 ```bash
-# Create data store
-vertex-search --config <config_file> datastore create <data_store_id> [--display-name "Name"]
+# Create search data store (default)
+vertex-search --config <config_file> datastore create <data_store_id> [--display-name "Name"] [--solution-type SEARCH]
+
+# Create recommendation data store
+vertex-search --config <config_file> datastore create <data_store_id> [--display-name "Name"] --solution-type RECOMMENDATION
 
 # Upload to Cloud Storage (RECOMMENDED)
 vertex-search --config <config_file> datastore upload-gcs <data_file> <bucket_name> [--create-bucket] [--folder path]
 
-# Import from Cloud Storage (RECOMMENDED) 
+# Import from Cloud Storage (RECOMMENDED)
 vertex-search --config <config_file> datastore import-gcs <data_store_id> <gcs_uri> [--wait]
 
 # List documents to verify import
@@ -244,19 +757,14 @@ vertex-search --config <config_file> datastore list <data_store_id> [--count 10]
 vertex-search --config <config_file> datastore import <data_store_id> <data_file> [--wait]
 ```
 
-**Examples:**
-```bash
-# Recommended workflow
-vertex-search --config my_config.json datastore upload-gcs examples/sample_data.json my-bucket --create-bucket
-vertex-search --config my_config.json datastore import-gcs my-datastore gs://my-bucket/vertex-ai-search/* --wait
-vertex-search --config my_config.json datastore list my-datastore --count 5
-```
-
 ### Search Commands
 
 ```bash
-# Create search engine
-vertex-search --config <config_file> search create-engine <engine_id> <data_store_id> [--display-name "Name"]
+# Create search engine (default)
+vertex-search --config <config_file> search create-engine <engine_id> <data_store_id> [--display-name "Name"] [--solution-type SEARCH]
+
+# Create recommendation engine
+vertex-search --config <config_file> search create-engine <engine_id> <data_store_id> [--display-name "Name"] --solution-type RECOMMENDATION
 
 # Search with options
 vertex-search --config <config_file> search query <query> [--engine-id <id>] [--filters <json>] [--facets <list>]
@@ -272,165 +780,52 @@ vertex-search --config <config_file> autocomplete suggest <query> [--engine-id <
 ### Recommendation Commands
 
 ```bash
-# Get recommendations
-vertex-search --config <config_file> recommend get --user-id <id> [--event-type view] [--document-ids <id1,id2>] [--engine-id <id>] [--max-results 10]
+# Record user interactions for recommendation training
+vertex-search --config <config_file> recommend record --user-id <user_id> --event-type <type> --document-id <id> [--data-store-id <id>] [--media-progress-duration <seconds>] [--media-progress-percentage <0.0-1.0>]
+
+# Get personalized recommendations
+vertex-search --config <config_file> recommend get --user-id <id> [--event-type media-play] [--document-ids <id1,id2>] [--engine-id <id>] [--max-results 10]
 ```
 
-**Examples:**
-```bash
-# Get recommendations for a user who viewed specific documents
-vertex-search --config my_config.json recommend get --user-id user123 --event-type view --document-ids "doc1,doc2,doc3" --engine-id my-engine --max-results 5
+### Command Examples
 
-# Get recommendations based on purchase event
-vertex-search --config my_config.json recommend get --user-id user456 --event-type purchase --document-ids "product-123" --engine-id my-engine
-```
-
-## Advanced Search Features
-
-### Autocomplete and Search Suggestions
-
-The autocomplete functionality provides intelligent query suggestions based on your indexed content:
+#### Data Workflow Examples
 
 ```bash
-# Basic autocomplete - get suggestions for partial queries
-vertex-search --config my_config.json autocomplete suggest "rom" --engine-id my-engine
-# Returns: ["romantic", "romantic comedy", "romance", "romantic drama"]
-
-# Autocomplete for specific domains
-vertex-search --config my_config.json autocomplete suggest "fam" --engine-id my-engine  
-# Returns: ["family", "family drama", "family comedy"]
-
-# Autocomplete works with multi-word queries
-vertex-search --config my_config.json autocomplete suggest "psychological thr" --engine-id my-engine
-# Returns: ["psychological thriller"]
+# Recommended data workflow
+vertex-search --config my_config.json datastore upload-gcs examples/sample_data.json my-bucket --create-bucket
+vertex-search --config my_config.json datastore import-gcs my-datastore gs://my-bucket/vertex-ai-search/* --wait
+vertex-search --config my_config.json datastore list my-datastore --count 5
 ```
 
-**Frontend Integration Pattern:**
-```javascript
-// Example: Real-time search suggestions in JavaScript
-async function getSuggestions(query) {
-  const response = await fetch(`/api/autocomplete?q=${encodeURIComponent(query)}`);
-  return await response.json();
-}
-
-// Debounced search input handler
-let searchTimeout;
-document.getElementById('search-input').addEventListener('input', (e) => {
-  clearTimeout(searchTimeout);
-  searchTimeout = setTimeout(() => {
-    getSuggestions(e.target.value).then(suggestions => {
-      // Display suggestions in dropdown
-      showSuggestions(suggestions);
-    });
-  }, 300);
-});
-```
-
-### Recommendations and Personalization
-
-Build personalized user experiences with the recommendation system:
+#### Recommendation Examples
 
 ```bash
-# Get recommendations based on user viewing history
-vertex-search --config my_config.json recommend get \
-  --user-id user123 \
-  --event-type view \
-  --document-ids "drama-short-001,drama-short-025" \
-  --engine-id my-engine \
-  --max-results 10
+# Record user media interactions (builds recommendation model)
+vertex-search --config my_config.json recommend record --user-id user123 --event-type media-play --document-id drama-001 --data-store-id my-datastore-reco
 
-# Get recommendations for different event types
-vertex-search --config my_config.json recommend get \
-  --user-id user456 \
-  --event-type purchase \
-  --document-ids "premium-drama-005" \
-  --engine-id my-engine \
-  --max-results 5
+# Record completion with automatic 100% progress
+vertex-search --config my_config.json recommend record --user-id user123 --event-type media-complete --document-id drama-001 --data-store-id my-datastore-reco
 
-# Get recommendations for users who liked specific content
-vertex-search --config my_config.json recommend get \
-  --user-id user789 \
-  --event-type like \
-  --document-ids "comedy-drama-012,teen-drama-008" \
-  --engine-id my-engine \
-  --max-results 8
+# Record completion with specific progress (2 minutes, 100%)
+vertex-search --config my_config.json recommend record --user-id user123 --event-type media-complete --document-id drama-002 --data-store-id my-datastore-reco --media-progress-duration 120.0 --media-progress-percentage 1.0
+
+# Record partial viewing (1 minute, 50%)
+vertex-search --config my_config.json recommend record --user-id user123 --event-type media-complete --document-id drama-003 --data-store-id my-datastore-reco --media-progress-duration 60.0 --media-progress-percentage 0.5
+
+# Record user viewing item details  
+vertex-search --config my_config.json recommend record --user-id user123 --event-type view-item --document-id drama-005 --data-store-id my-datastore-reco
+
+# Record home page view
+vertex-search --config my_config.json recommend record --user-id user123 --event-type view-home-page --data-store-id my-datastore-reco
+
+# Get recommendations for a user based on their viewing history
+vertex-search --config my_config.json recommend get --user-id user123 --event-type media-play --document-ids "drama-001,drama-005" --engine-id my-engine-reco --max-results 5
 ```
 
-**Recommendation Event Types:**
-- `view` - User viewed/watched content
-- `purchase` - User purchased/subscribed to content  
-- `like` - User liked/favorited content
-- `share` - User shared content
-- `click` - User clicked on content
-- `add-to-cart` - User added to cart/watchlist
-- `search` - User searched for content
+## Frontend Integration
 
-**Building User Profiles:**
-```bash
-# Example: Track user interactions for better recommendations
-
-# User viewed a romantic drama
-vertex-search --config my_config.json recommend record \
-  --user-id user123 \
-  --event-type view \
-  --document-id "romantic-drama-015" \
-  --engine-id my-engine
-
-# User purchased premium content
-vertex-search --config my_config.json recommend record \
-  --user-id user123 \
-  --event-type purchase \
-  --document-id "premium-series-001" \
-  --engine-id my-engine
-
-# Now get personalized recommendations
-vertex-search --config my_config.json recommend get \
-  --user-id user123 \
-  --event-type view \
-  --engine-id my-engine
-```
-
-### Advanced Search with Filters and Facets
-
-Combine search, filters, and facets for powerful discovery experiences:
-
-```bash
-# Search with multiple filters
-vertex-search --config my_config.json search query "family story" \
-  --engine-id my-engine \
-  --filters '{"genre": ["family_drama"], "duration_seconds": 120, "content_type": "custom"}' \
-  --facets "genre,content_type,language" \
-  --page-size 20
-
-# Search for content in specific language with rating filter
-vertex-search --config my_config.json search query "mystery" \
-  --engine-id my-engine \
-  --filters '{"language": "en", "rating.mpaa_rating": ["PG", "PG-13"]}' \
-  --facets "genre,rating.mpaa_rating"
-
-# Search recent content with creator filter
-vertex-search --config my_config.json search query "thriller" \
-  --engine-id my-engine \
-  --filters '{"creator_info.creator_type": "studio", "created_at": "2024-01-01"}' \
-  --facets "creator_info.creator_type,genre"
-```
-
-**Filter Syntax Examples:**
-```json
-{
-  "genre": ["romantic_drama", "family_drama"],           // Array values (OR logic)
-  "content_type": "custom",                              // String value
-  "duration_seconds": 120,                               // Numeric value  
-  "language": "en",                                      // String exact match
-  "rating.mpaa_rating": ["PG", "PG-13"],               // Nested field array
-  "creator_info.verified": true,                         // Boolean value
-  "audience_metrics.view_count": 1000                    // Nested numeric field
-}
-```
-
-## Integration with Frontend Applications
-
-The CLI is designed for easy integration with web applications:
+The CLI is designed for easy integration with web applications through its manager classes.
 
 ### Python Integration
 
@@ -438,13 +833,13 @@ The CLI is designed for easy integration with web applications:
 from pathlib import Path
 from vertex_search.config import AppConfig, ConfigManager
 from vertex_search.managers import (
-    SearchManager, 
-    AutocompleteManager, 
+    SearchManager,
+    AutocompleteManager,
     RecommendationManager
 )
 
 # Load configuration
-config = AppConfig.from_env(schema_file=Path(\"your_schema.json\"))
+config = AppConfig.from_env(schema_file=Path("your_schema.json"))
 config_manager = ConfigManager(config)
 
 # Create managers
@@ -454,41 +849,41 @@ recommendation_manager = RecommendationManager(config_manager)
 
 # Perform search with filters and facets
 results = search_manager.search(
-    query=\"romantic drama\",
-    engine_id=\"your-engine\",
-    filters={\"genre\": [\"romantic_drama\"], \"content_type\": \"custom\"},
-    facets=[\"genre\", \"content_type\", \"language\"],
+    query="romantic drama",
+    engine_id="your-engine",
+    filters={"genre": ["romantic_drama"], "content_type": "custom"},
+    facets=["genre", "content_type", "language"],
     page_size=20
 )
 
 # Get autocomplete suggestions
 suggestions = autocomplete_manager.get_suggestions(
-    query=\"rom\",
-    engine_id=\"your-engine\"
+    query="rom",
+    engine_id="your-engine"
 )
 
 # Get personalized recommendations
 user_event = {
-    'eventType': 'view',
+    'eventType': 'media-play',
     'userPseudoId': 'user123',
     'documents': ['doc1', 'doc2', 'doc3']
 }
 recommendations = recommendation_manager.get_recommendations(
     user_event=user_event,
-    engine_id=\"your-engine\", 
+    engine_id="your-engine",
     max_results=10
 )
 
 # Record user interactions for better future recommendations
 recommendation_manager.record_user_event(
-    event_type=\"view\",
-    user_pseudo_id=\"user123\",
-    documents=[\"doc1\"],
-    engine_id=\"your-engine\"
+    event_type="media-play",
+    user_pseudo_id="user123",
+    documents=["doc1"],
+    engine_id="your-engine"
 )
 ```
 
-### REST API Wrapper
+### REST API Wrapper Example
 
 You can easily wrap the managers in a REST API using FastAPI, Flask, or Django:
 
@@ -497,19 +892,19 @@ import json
 from typing import Optional
 from fastapi import FastAPI, Query
 from vertex_search.managers import (
-    SearchManager, 
-    AutocompleteManager, 
+    SearchManager,
+    AutocompleteManager,
     RecommendationManager
 )
 
 app = FastAPI()
 
 # Initialize managers (do this once at startup)
-# search_manager = SearchManager(config_manager)  
+# search_manager = SearchManager(config_manager)
 # autocomplete_manager = AutocompleteManager(config_manager)
 # recommendation_manager = RecommendationManager(config_manager)
 
-@app.get(\"/search\")
+@app.get("/search")
 async def search(
     q: str,
     engine_id: str,
@@ -517,7 +912,7 @@ async def search(
     facets: Optional[str] = None,
     page_size: int = 10
 ):
-    \"\"\"Perform search with optional filters and facets.\"\"\"
+    """Perform search with optional filters and facets."""
     results = search_manager.search(
         query=q,
         engine_id=engine_id,
@@ -527,150 +922,248 @@ async def search(
     )
     return results
 
-@app.get(\"/autocomplete\")
+@app.get("/autocomplete")
 async def autocomplete(q: str, engine_id: str):
-    \"\"\"Get autocomplete suggestions.\"\"\"
+    """Get autocomplete suggestions."""
     suggestions = autocomplete_manager.get_suggestions(
         query=q,
         engine_id=engine_id
     )
-    return {\"suggestions\": suggestions}
+    return {"suggestions": suggestions}
 
-@app.get(\"/recommendations\") 
+@app.get("/recommendations")
 async def get_recommendations(
     user_id: str,
     engine_id: str,
-    event_type: str = \"view\",
+    event_type: str = "media-play",
     document_ids: Optional[str] = None,
     max_results: int = 10
 ):
-    \"\"\"Get personalized recommendations for a user.\"\"\"
+    """Get personalized recommendations for a user."""
     user_event = {
         'eventType': event_type,
         'userPseudoId': user_id,
         'documents': document_ids.split(',') if document_ids else []
     }
-    
+
     recommendations = recommendation_manager.get_recommendations(
         user_event=user_event,
         engine_id=engine_id,
         max_results=max_results
     )
-    return {\"recommendations\": recommendations}
+    return {"recommendations": recommendations}
 
-@app.post(\"/events\")
+@app.post("/events")
 async def record_event(
     user_id: str,
     event_type: str,
     document_id: str,
     engine_id: str
 ):
-    \"\"\"Record a user interaction event.\"\"\"
+    """Record a user interaction event."""
     success = recommendation_manager.record_user_event(
         event_type=event_type,
         user_pseudo_id=user_id,
         documents=[document_id],
         engine_id=engine_id
     )
-    return {\"success\": success}
-
-# Example usage:
-# GET /search?q=romantic%20drama&engine_id=my-engine&filters={\"genre\":[\"romantic_drama\"]}
-# GET /autocomplete?q=rom&engine_id=my-engine  
-# GET /recommendations?user_id=user123&engine_id=my-engine&event_type=view&document_ids=doc1,doc2
-# POST /events?user_id=user123&event_type=view&document_id=doc1&engine_id=my-engine
+    return {"success": success}
 ```
 
-## Authentication
+### Frontend JavaScript Integration
 
-The system supports multiple authentication methods with automatic fallback:
+```javascript
+// Real-time search with autocomplete
+class VertexSearch {
+	constructor(apiUrl) {
+		this.apiUrl = apiUrl;
+		this.searchTimeout = null;
+	}
 
-### Method 1: API Key (Recommended)
+	// Debounced autocomplete
+	setupAutocomplete(inputElement, suggestionsContainer) {
+		inputElement.addEventListener("input", (e) => {
+			clearTimeout(this.searchTimeout);
+			this.searchTimeout = setTimeout(() => {
+				if (e.target.value.length >= 2) {
+					this.getSuggestions(e.target.value).then((suggestions) => {
+						this.showSuggestions(suggestions, suggestionsContainer);
+					});
+				}
+			}, 300);
+		});
+	}
 
-```bash
-export VERTEX_PROJECT_ID="your-gcp-project-id"
-export VERTEX_API_KEY="your-google-cloud-api-key"
+	// Get autocomplete suggestions
+	async getSuggestions(query) {
+		const response = await fetch(`${this.apiUrl}/autocomplete?q=${encodeURIComponent(query)}&engine_id=my-engine`);
+		return await response.json();
+	}
+
+	// Perform search
+	async search(query, filters = {}, facets = []) {
+		const params = new URLSearchParams({
+			q: query,
+			engine_id: "my-engine",
+		});
+
+		if (Object.keys(filters).length > 0) {
+			params.append("filters", JSON.stringify(filters));
+		}
+
+		if (facets.length > 0) {
+			params.append("facets", facets.join(","));
+		}
+
+		const response = await fetch(`${this.apiUrl}/search?${params}`);
+		return await response.json();
+	}
+
+	// Get recommendations
+	async getRecommendations(userId, eventType = "media-play", documentIds = []) {
+		const params = new URLSearchParams({
+			user_id: userId,
+			engine_id: "my-engine-reco",
+			event_type: eventType,
+			max_results: "10",
+		});
+
+		if (documentIds.length > 0) {
+			params.append("document_ids", documentIds.join(","));
+		}
+
+		const response = await fetch(`${this.apiUrl}/recommendations?${params}`);
+		return await response.json();
+	}
+
+	// Track user interactions
+	async trackEvent(userId, eventType, documentId) {
+		const response = await fetch(`${this.apiUrl}/events`, {
+			method: "POST",
+			headers: {
+				"Content-Type": "application/x-www-form-urlencoded",
+			},
+			body: new URLSearchParams({
+				user_id: userId,
+				event_type: eventType,
+				document_id: documentId,
+				engine_id: "my-engine-reco",
+			}),
+		});
+		return await response.json();
+	}
+}
+
+// Usage example
+const searchClient = new VertexSearch("/api");
+searchClient.setupAutocomplete(document.getElementById("search-input"), document.getElementById("suggestions"));
 ```
 
-**To create an API Key:**
+## Architecture
 
-1. Go to Google Cloud Console → APIs & Services → Credentials
-2. Click "Create Credentials" → "API Key"
-3. Restrict the key to Discovery Engine API for security
-4. Copy the key and set the environment variable
+### Core Components
 
-### Method 2: Service Account Key File
+The system is built with clean architecture principles and SOLID design:
 
-```bash
-export GOOGLE_APPLICATION_CREDENTIALS="path/to/service-account.json"
-export VERTEX_PROJECT_ID="your-gcp-project-id"
+- **DatasetManager**: Schema-agnostic dataset creation and validation
+- **MediaAssetManager**: Vertex AI data store management
+- **SearchManager**: Search engine creation and query execution
+- **AutocompleteManager**: Autocomplete functionality
+- **RecommendationManager**: User event tracking and recommendations
+- **DataGenerator**: Automatic sample data generation from schemas
+
+### Design Principles
+
+- **SOLID Principles**: Single responsibility, open/closed, interface segregation
+- **DRY (Don't Repeat Yourself)**: Reusable components and utilities
+- **Schema Flexibility**: No hardcoded assumptions about data structure
+- **Clean Interfaces**: Easy integration with any frontend framework
+
+### System Architecture Diagram
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    Frontend Application                      │
+│  ┌─────────────────┐  ┌─────────────────┐  ┌──────────────┐│
+│  │   Search UI     │  │  Autocomplete   │  │ Recommendations││
+│  └─────────────────┘  └─────────────────┘  └──────────────┘│
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│                     REST API Layer                          │
+│  ┌─────────────────┐  ┌─────────────────┐  ┌──────────────┐│
+│  │ FastAPI/Flask   │  │   Search Routes │  │   Rec Routes ││
+│  └─────────────────┘  └─────────────────┘  └──────────────┘│
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│                  Vertex Search CLI Layer                    │
+│  ┌─────────────────┐  ┌─────────────────┐  ┌──────────────┐│
+│  │ SearchManager   │  │AutocompleteManager│ │RecommendationManager│
+│  └─────────────────┘  └─────────────────┘  └──────────────┘│
+│  ┌─────────────────┐  ┌─────────────────┐  ┌──────────────┐│
+│  │MediaAssetManager│  │ DatasetManager  │  │ConfigManager ││
+│  └─────────────────┘  └─────────────────┘  └──────────────┘│
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│                 Google Cloud Vertex AI                      │
+│  ┌─────────────────┐  ┌─────────────────┐  ┌──────────────┐│
+│  │  Search Engine  │  │   Data Stores   │  │ Cloud Storage││
+│  └─────────────────┘  └─────────────────┘  └──────────────┘│
+└─────────────────────────────────────────────────────────────┘
 ```
 
-### Method 3: Application Default Credentials
+### Data Flow
 
-```bash
-gcloud auth application-default login
-export VERTEX_PROJECT_ID="your-gcp-project-id"
-```
+#### Search Flow
 
-### Method 4: Compute Engine/Cloud Run Service Account
+1. User enters query in frontend
+2. Frontend calls REST API `/search` endpoint
+3. API uses SearchManager to query Vertex AI
+4. Results returned with facets and filters
+5. Frontend displays results with filtering UI
 
-No additional setup needed when running on Google Cloud services.
+#### Recommendation Flow
 
-## Configuration Options
+1. User interactions tracked via `/events` endpoint
+2. RecommendationManager records events to Vertex AI
+3. ML models train on user behavior patterns
+4. `/recommendations` endpoint provides personalized suggestions
+5. Frontend displays recommended content
 
-### Environment Variables
+### Custom Schema Support
 
-All configuration can be set via environment variables (see `examples/.env.example`):
-
-**Authentication:**
-
-- `VERTEX_PROJECT_ID`: Google Cloud Project ID (required)
-- `VERTEX_API_KEY`: Google Cloud API Key (recommended method)
-- `VERTEX_LOCATION`: Vertex AI location (default: global)
-
-**Schema Configuration:**
-
-- `SCHEMA_SEARCHABLE_FIELDS`: Comma-separated list of searchable fields
-- `SCHEMA_FILTERABLE_FIELDS`: Comma-separated list of filterable fields
-- `SCHEMA_FACETABLE_FIELDS`: Comma-separated list of facetable fields
-
-### Configuration File
-
-Use JSON configuration files for complex setups (see `examples/config.json`):
+The system works with any valid JSON schema through its flexible configuration:
 
 ```json
 {
-  \"vertex_ai\": {
-    \"project_id\": \"your-project\",
-    \"api_key\": \"your-api-key\",
-    \"location\": \"global\"
-  },
-  \"schema\": {
-    \"schema_file\": \"your_schema.json\",
-    \"searchable_fields\": [\"title\", \"content\"],
-    \"filterable_fields\": [\"category\", \"date\"],
-    \"facetable_fields\": [\"category\", \"type\"]
-  }
+	"$schema": "http://json-schema.org/draft-07/schema#",
+	"title": "Your Content Schema",
+	"type": "object",
+	"required": ["id", "title"],
+	"properties": {
+		"id": { "type": "string" },
+		"title": { "type": "string" },
+		"your_custom_fields": { "type": "string" }
+	}
 }
 ```
 
-## Error Handling
+Configure field mappings in your config file:
 
-The system includes comprehensive error handling with user-friendly messages:
-
-- **Configuration errors**: Missing required fields, invalid schema files
-- **Vertex AI errors**: Permission issues, quota limits, invalid requests
-- **Data validation errors**: Schema validation failures, missing required fields
-
-## Logging
-
-Structured logging with Rich formatting:
-
-```python
-from vertex_search.utils import setup_logging
-
-logger = setup_logging(level=\"INFO\", log_file=Path(\"app.log\"))
+```json
+{
+	"schema": {
+		"schema_file": "your_schema.json",
+		"searchable_fields": ["title", "description", "tags"],
+		"filterable_fields": ["category", "status", "date"],
+		"facetable_fields": ["category", "type"]
+	}
+}
 ```
 
 ## Example: Drama Shorts Use Case
@@ -683,114 +1176,68 @@ The `examples/` directory contains a complete example for a drama shorts platfor
 
 This demonstrates the system's flexibility while providing a concrete example for a media startup.
 
-## Troubleshooting
+## Search vs Recommendations: Key Differences
 
-### Common Issues and Solutions
+### 🔍 **Search System** (Query-Based Discovery)
 
-#### 1. "Project was not passed and could not be determined from the environment"
+**Purpose**: Help users find specific content based on their search queries **Use Cases**:
 
-**Error:**
+- "Find dramas about family relationships"
+- "Search for content by specific actors"
+- "Filter by genre, rating, duration"
+
+**Architecture**:
+
+- Data Store: `SOLUTION_TYPE_SEARCH`
+- Engine: `SOLUTION_TYPE_SEARCH`
+- API: Uses SearchServiceClient
+
+### 🎯 **Recommendation System** (Personalized Discovery)
+
+**Purpose**: Suggest relevant content based on user behavior patterns **Use Cases**:
+
+- "Users who watched this also watched..."
+- "Recommended for you based on viewing history"
+- "Similar content to what you just viewed"
+
+**Architecture**:
+
+- Data Store: `SOLUTION_TYPE_RECOMMENDATION`
+- Engine: `SOLUTION_TYPE_RECOMMENDATION`
+- API: Uses RecommendationServiceClient
+
+### **Why Separate Systems?**
+
+Vertex AI Search uses different machine learning models optimized for each use case:
+
+- **Search Models**: Optimized for keyword matching, semantic understanding, and relevance ranking
+- **Recommendation Models**: Optimized for collaborative filtering, content-based filtering, and user behavior analysis
+
+**Important**: You need **separate data stores and engines** for search and recommendations, even if using the same
+underlying data.
+
+## Import Methods Comparison
+
+### Cloud Storage Import (Recommended)
+
+```bash
+# Upload to Cloud Storage first
+vertex-search --config my_config.json datastore upload-gcs data.json bucket-name --create-bucket
+# Then import from Cloud Storage
+vertex-search --config my_config.json datastore import-gcs datastore-id gs://bucket-name/vertex-ai-search/*
 ```
-OSError: Project was not passed and could not be determined from the environment.
+
+**Pros**: Full console visibility, reliable, easy debugging, source of truth **Best for**: Production use, large
+datasets, when you need to see data in console
+
+### Inline Import (Legacy)
+
+```bash
+vertex-search --config my_config.json datastore import datastore-id data.json
 ```
 
-**Solution:**
-This error occurs when the Google Cloud project ID is not properly configured. Fix by:
-
-1. **Set the environment variable:**
-   ```bash
-   export VERTEX_PROJECT_ID="your-gcp-project-id"
-   ```
-
-2. **Or set it in your config file:**
-   ```json
-   {
-     "vertex_ai": {
-       "project_id": "your-gcp-project-id"
-     }
-   }
-   ```
-
-3. **Or use gcloud default project:**
-   ```bash
-   gcloud config set project your-gcp-project-id
-   ```
-
-#### 2. Authentication Issues
-
-**Error:** Permission denied or authentication failures
-
-**Solutions:**
-
-1. **Use Application Default Credentials (Recommended):**
-   ```bash
-   gcloud auth application-default login
-   export VERTEX_PROJECT_ID="your-gcp-project-id"
-   ```
-
-2. **Enable required APIs:**
-   ```bash
-   gcloud services enable discoveryengine.googleapis.com
-   gcloud services enable storage.googleapis.com
-   ```
-
-3. **Check IAM permissions:** Ensure your account has:
-   - Discovery Engine Admin or Editor role
-   - Storage Admin role (for Cloud Storage operations)
-
-#### 3. Import/Upload Failures
-
-**Issue:** Data import fails or documents don't appear in search
-
-**Solutions:**
-
-1. **Use Cloud Storage import (recommended):**
-   ```bash
-   # Upload first
-   vertex-search --config my_config.json datastore upload-gcs data.json bucket-name --create-bucket
-   # Then import
-   vertex-search --config my_config.json datastore import-gcs datastore-id gs://bucket-name/vertex-ai-search/*
-   ```
-
-2. **Verify data format:** Ensure JSON data follows the expected schema
-3. **Check import status:** Use `--wait` flag to wait for completion
-4. **Verify import:** Use `datastore list` to check if documents were imported
-
-#### 4. Search Returns No Results
-
-**Solutions:**
-
-1. **Check data was imported:**
-   ```bash
-   vertex-search --config my_config.json datastore list datastore-id --count 5
-   ```
-
-2. **Verify search engine is properly linked to datastore**
-3. **Try broader search terms**
-4. **Check if facet filters are too restrictive**
-
-#### 5. Configuration File Issues
-
-**Error:** Invalid configuration or missing fields
-
-**Solutions:**
-
-1. **Copy from examples:**
-   ```bash
-   cp examples/config.json my_config.json
-   cp examples/.env.example .env
-   ```
-
-2. **Validate JSON syntax:** Use a JSON validator
-3. **Check required fields:** Ensure all required configuration is present
-
-#### 6. Schema Validation Errors
-
-**Solutions:**
-
-1. **Validate your schema file:** Ensure it's valid JSON Schema format
-2. **Check data matches schema:** Run dataset validation before import
-3. **Use the example schema as reference:** See `examples/drama_shorts_schema.json`
+**Pros**: Single command **Cons**: Limited console visibility, less reliable for large datasets **Best for**: Quick
+testing only
 
 ## Contributing
 
