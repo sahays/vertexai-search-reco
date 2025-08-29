@@ -3,6 +3,7 @@
 import json
 from typing import Dict, Any, List, Optional
 from google.cloud import discoveryengine_v1beta
+from google.protobuf.json_format import MessageToDict
 
 from ..config import ConfigManager
 from ..interfaces import RecommendationManagerInterface
@@ -54,28 +55,36 @@ class RecommendationManager(RecommendationManagerInterface):
                         for doc_id in user_event.get('documents', [])
                     ]
                 ),
-                page_size=max_results
+                page_size=max_results,
+                params={"returnDocument": True}
             )
             
             response = self.recommendation_client.recommend(request)
             
             recommendations = []
-            for result in response.results:
-                # Handle both structData and jsonData formats
-                if hasattr(result.document, 'struct_data') and result.document.struct_data:
-                    doc_dict = dict(result.document.struct_data)
-                elif hasattr(result.document, 'json_data') and result.document.json_data:
-                    # json_data might be bytes or string
-                    json_data = result.document.json_data
-                    if isinstance(json_data, bytes):
-                        json_data = json_data.decode('utf-8')
-                    doc_dict = json.loads(json_data)
-                else:
-                    doc_dict = {}
+            for i, result in enumerate(response.results):
+                logger.info(f"--- Processing recommendation result {i} ---")
+                logger.debug(f"Raw result object: {result}")
+
+                doc_dict = {}
+                if result.document:
+                    # Convert the entire protobuf Document message to a dictionary
+                    doc_dict = MessageToDict(result.document._pb)
+                    logger.info(f"Successfully parsed document for result {i}")
+                    logger.debug(f"Parsed document dictionary: {doc_dict}")
+
+                # The primary ID for the recommendation result is on the result object itself.
+                if result.id:
+                    doc_dict['id'] = result.id
                 
+                # The score is in the metadata map.
+                score = result.metadata.get('score')
+                if score:
+                    logger.debug(f"Found score in metadata for result {i}: {score}")
+
                 recommendations.append({
                     'document': doc_dict,
-                    'score': getattr(result, 'score', None)
+                    'score': score
                 })
             
             return recommendations

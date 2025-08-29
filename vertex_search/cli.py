@@ -465,9 +465,10 @@ def recommend(ctx):
 @click.option('--document-ids', help='Document IDs (comma-separated)')
 @click.option('--engine-id', help='Search engine ID')
 @click.option('--max-results', default=10, help='Maximum number of recommendations')
+@click.option('--json', 'output_json', is_flag=True, help='Output results as JSON')
 @click.pass_context
 def get_recommendations(ctx, user_id: str, event_type: str, document_ids: Optional[str], 
-                       engine_id: Optional[str], max_results: int):
+                       engine_id: Optional[str], max_results: int, output_json: bool):
     """Get recommendations for a user."""
     config_manager: ConfigManager = ctx.obj['config_manager']
     recommendation_manager = RecommendationManager(config_manager)
@@ -489,19 +490,25 @@ def get_recommendations(ctx, user_id: str, event_type: str, document_ids: Option
         )
         
         if recommendations:
-            table = Table(title=f"Recommendations for user {user_id}")
-            table.add_column("Document ID", style="cyan")
-            table.add_column("Title", style="green")
-            table.add_column("Score", style="yellow")
-            
-            for rec in recommendations:
-                doc = rec.get('document', {})
-                score = rec.get('score', 'N/A')
-                doc_id = doc.get('id', 'N/A')
-                title = doc.get('title', doc.get('name', 'N/A'))
-                table.add_row(str(doc_id), str(title), str(score))
-            
-            console.print(table)
+            if output_json:
+                # Using print instead of console.print to avoid rich formatting
+                print(json.dumps(recommendations, indent=2))
+            else:
+                table = Table(title=f"Recommendations for user {user_id}")
+                table.add_column("Document ID", style="cyan")
+                table.add_column("Title", style="green")
+                table.add_column("Score", style="yellow")
+                
+                for rec in recommendations:
+                    doc = rec.get('document', {})
+                    score = rec.get('score', 'N/A')
+                    doc_id = doc.get('id', 'N/A')
+                    # The title might be in a 'structData' sub-dictionary
+                    struct_data = doc.get('structData', {})
+                    title = struct_data.get('title', doc.get('title', 'N/A'))
+                    table.add_row(str(doc_id), str(title), str(score))
+                
+                console.print(table)
         else:
             console.print("No recommendations found")
             
