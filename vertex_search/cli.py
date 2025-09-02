@@ -363,9 +363,10 @@ def create_search_engine(ctx, engine_id: str, data_store_ids: tuple, display_nam
 @click.option('--filters', help='Search filters as JSON string')
 @click.option('--facets', help='Facets to include (comma-separated)')
 @click.option('--page-size', default=10, help='Number of results per page')
+@click.option('--json', 'output_json', is_flag=True, help='Output results as JSON')
 @click.pass_context
 def search_query(ctx, query: str, engine_id: Optional[str], filters: Optional[str], 
-                 facets: Optional[str], page_size: int):
+                 facets: Optional[str], page_size: int, output_json: bool):
     """Perform a search query."""
     config_manager: ConfigManager = ctx.obj['config_manager']
     search_manager = SearchManager(config_manager)
@@ -388,8 +389,13 @@ def search_query(ctx, query: str, engine_id: Optional[str], filters: Optional[st
             page_size=page_size
         )
         
+        if output_json:
+            # Using print instead of console.print to avoid rich formatting
+            print(json.dumps(results, indent=2))
+            return
+
         # Display results
-        if 'results' in results:
+        if 'results' in results and results['results']:
             table = Table(title=f"Search Results for: {query}")
             table.add_column("ID", style="cyan")
             table.add_column("Title", style="green")
@@ -404,7 +410,7 @@ def search_query(ctx, query: str, engine_id: Optional[str], filters: Optional[st
             
             console.print(table)
             
-            if 'facets' in results:
+            if 'facets' in results and results['facets']:
                 console.print("\n[bold]Facets:[/bold]")
                 for facet in results['facets']:
                     console.print(f"  {facet}")
@@ -414,6 +420,7 @@ def search_query(ctx, query: str, engine_id: Optional[str], filters: Optional[st
     except Exception as e:
         console.print(f"[red]Error: {str(e)}[/red]")
         ctx.exit(1)
+
 
 
 @main.group()

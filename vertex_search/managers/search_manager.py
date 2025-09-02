@@ -3,6 +3,7 @@
 import json
 from typing import Dict, Any, List, Optional
 from google.cloud import discoveryengine_v1beta
+from google.protobuf.json_format import MessageToDict
 
 from ..config import ConfigManager
 from ..interfaces import SearchManagerInterface
@@ -159,42 +160,14 @@ class SearchManager(SearchManagerInterface):
             
             response = self.search_client.search(search_request)
             
-            # Format response
-            results = []
-            for result in response.results:
-                # Handle both structData and jsonData formats
-                if hasattr(result.document, 'struct_data') and result.document.struct_data:
-                    doc_dict = dict(result.document.struct_data)
-                elif hasattr(result.document, 'json_data') and result.document.json_data:
-                    # json_data might be bytes or string
-                    json_data = result.document.json_data
-                    if isinstance(json_data, bytes):
-                        json_data = json_data.decode('utf-8')
-                    doc_dict = json.loads(json_data)
-                else:
-                    doc_dict = {}
-                
-                results.append({
-                    'document': doc_dict,
-                    'score': getattr(result, 'score', None)
-                })
+            # Convert the entire protobuf response to a dictionary.
+            # This is the most robust way to handle all nested complex objects
+            # and ensure the result is fully JSON serializable.
+            response_dict = MessageToDict(response._pb)
             
-            facet_results = []
-            for facet in response.facets:
-                facet_values = [{'value': fv.value, 'count': fv.count} for fv in facet.values]
-                facet_results.append({
-                    'key': facet.key,
-                    'values': facet_values
-                })
+            logger.debug(f"Search returned {len(response_dict.get('results', []))} results.")
             
-            logger.debug(f"Search returned {len(results)} results, {len(facet_results)} facets, total_size: {response.total_size}")
-            
-            return {
-                'results': results,
-                'facets': facet_results,
-                'total_size': response.total_size,
-                'next_page_token': response.next_page_token
-            }
+            return response_dict
             
         except Exception as e:
             logger.error(f"Search failed: {str(e)}")
