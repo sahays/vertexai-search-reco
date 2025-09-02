@@ -2,10 +2,6 @@
 requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
-[tool.setuptools.packages.find]
-where = ["."]
-include = ["vertex_search*"]
-
 [project]
 name = "vertexai-search-media"
 version = "0.1.0"
@@ -26,9 +22,6 @@ dependencies = [
 
 [project.scripts]
 vertex-search = "vertex_search.cli:main"
-
-[tool.setuptools]
-packages = ["vertex_search"]
 
 [tool.setuptools.packages.find]
 where = ["."]
