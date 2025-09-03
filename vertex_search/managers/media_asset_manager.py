@@ -6,7 +6,7 @@ from typing import Dict, Any, List
 from google.cloud import discoveryengine_v1beta
 from google.cloud import storage
 
-from ..config import ConfigManager
+from ..config import ConfigManager, BigQueryConfig
 from ..interfaces import MediaAssetManagerInterface
 from ..utils import handle_vertex_ai_error, DataStoreError, setup_logging
 from ..auth import get_credentials, setup_client_options
@@ -40,6 +40,9 @@ class MediaAssetManager(MediaAssetManagerInterface):
         if credentials is not None:
             storage_kwargs["credentials"] = credentials
         self.storage_client = storage.Client(**storage_kwargs)
+        
+        # Initialize Schema Service client
+        self.schema_client = discoveryengine_v1beta.SchemaServiceClient(**client_kwargs)
         
     @handle_vertex_ai_error
     def create_data_store(self, data_store_id: str, display_name: str, solution_type: str = "SEARCH") -> bool:
@@ -277,7 +280,35 @@ class MediaAssetManager(MediaAssetManagerInterface):
         except Exception as e:
             logger.error(f"Failed to import from Cloud Storage: {str(e)}")
             raise DataStoreError(f"Failed to import from Cloud Storage: {str(e)}") from e
-    
+
+    @handle_vertex_ai_error
+    def import_from_bigquery(self, data_store_id: str, bq_config: BigQueryConfig) -> str:
+        """Import documents from BigQuery. Returns operation ID."""
+        try:
+            parent = f"projects/{self.config_manager.vertex_ai.project_id}/locations/{self.config_manager.vertex_ai.location}/collections/default_collection/dataStores/{data_store_id}/branches/default_branch"
+            
+            # Create BigQuery source
+            bigquery_source = discoveryengine_v1beta.BigQuerySource(
+                project_id=bq_config.project_id,
+                dataset_id=bq_config.dataset_id,
+                table_id=bq_config.table_id
+            )
+            
+            # Create import request with BigQuery source
+            request = discoveryengine_v1beta.ImportDocumentsRequest(
+                parent=parent,
+                bigquery_source=bigquery_source,
+                reconciliation_mode=discoveryengine_v1beta.ImportDocumentsRequest.ReconciliationMode.INCREMENTAL
+            )
+            
+            operation = self.import_client.import_documents(request=request)
+            logger.info(f"Started BigQuery import operation: {operation.operation.name}")
+            return operation.operation.name
+            
+        except Exception as e:
+            logger.error(f"Failed to import from BigQuery: {str(e)}")
+            raise DataStoreError(f"Failed to import from BigQuery: {str(e)}") from e
+
     def create_bucket_if_not_exists(self, bucket_name: str, location: str = "US") -> bool:
         """Create a Cloud Storage bucket if it doesn't exist."""
         try:
@@ -297,6 +328,114 @@ class MediaAssetManager(MediaAssetManagerInterface):
             logger.error(f"Failed to create bucket: {str(e)}")
             return False
     
+    def apply_field_settings_from_config(self, data_store_id: str) -> bool:
+        """Apply field settings from config to the data store schema."""
+        try:
+            # Get the schema configuration
+            schema_config = self.config_manager.schema
+            
+            # Check if any field settings are configured
+            field_settings = {
+                'retrievable': schema_config.retrievable_fields,
+                'searchable': schema_config.searchable_fields,
+                'facetable': schema_config.facetable_fields,
+                'completable': schema_config.completable_fields,
+                'indexable': schema_config.indexable_fields
+            }
+            
+            # Skip if no field settings configured
+            if not any(field_settings.values()):
+                logger.info("No field settings configured in config - skipping schema update")
+                return True
+            
+            logger.info("Applying field settings from config to schema...")
+            
+            # Load the JSON schema file
+            schema_dict = self.config_manager.validate_schema_file()
+            
+            # Track changes
+            changes_made = []
+            
+            # Apply field settings to schema properties
+            properties = schema_dict.get("properties", {})
+            
+            for field_name, field_spec in properties.items():
+                field_updated = False
+                
+                # Skip array fields as Vertex AI doesn't support annotations on them
+                field_type = field_spec.get("type", "")
+                if field_type == "array" or (isinstance(field_type, list) and "array" in field_type):
+                    logger.info(f"Skipping array field '{field_name}' (Vertex AI limitation)")
+                    continue
+                
+                # Apply retrievable setting
+                if field_name in schema_config.retrievable_fields:
+                    field_spec["retrievable"] = True
+                    field_updated = True
+                
+                # Apply searchable setting
+                if field_name in schema_config.searchable_fields:
+                    field_spec["searchable"] = True
+                    field_updated = True
+                
+                # Apply facetable setting
+                if field_name in schema_config.facetable_fields:
+                    field_spec["facetable"] = True
+                    field_updated = True
+                
+                # Apply completable setting
+                if field_name in schema_config.completable_fields:
+                    field_spec["completable"] = True
+                    field_updated = True
+                
+                # Apply indexable setting
+                if field_name in schema_config.indexable_fields:
+                    field_spec["indexable"] = True
+                    field_updated = True
+                
+                if field_updated:
+                    changes_made.append(field_name)
+            
+            # Validate that configured fields exist in schema
+            all_configured_fields = set()
+            for fields_list in field_settings.values():
+                all_configured_fields.update(fields_list)
+            
+            missing_fields = all_configured_fields - set(properties.keys())
+            if missing_fields:
+                logger.warning(f"Fields configured but not found in schema: {missing_fields}")
+            
+            if not changes_made:
+                logger.info("No field settings applied - all configured fields may be missing from schema")
+                return True
+            
+            # Update the schema via API
+            schema_name = f"projects/{self.config_manager.vertex_ai.project_id}/locations/{self.config_manager.vertex_ai.location}/collections/default_collection/dataStores/{data_store_id}/schemas/default_schema"
+            
+            schema = discoveryengine_v1beta.Schema(
+                name=schema_name,
+                struct_schema=schema_dict
+            )
+            
+            request = discoveryengine_v1beta.UpdateSchemaRequest(schema=schema)
+            operation = self.schema_client.update_schema(request=request)
+            
+            logger.info(f"Schema update started: {operation.operation.name}")
+            logger.info(f"Applied field settings to {len(changes_made)} fields: {changes_made}")
+            
+            # Log field setting summary
+            for setting_type, fields in field_settings.items():
+                if fields:
+                    applied_fields = [f for f in fields if f in changes_made]
+                    if applied_fields:
+                        logger.info(f"Set {len(applied_fields)} fields as {setting_type}: {applied_fields}")
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to apply field settings from config: {str(e)}")
+            return False
+
     def delete_data_store(self, data_store_id: str) -> bool:
         """Delete a data store."""
         try:

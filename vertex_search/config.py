@@ -33,6 +33,16 @@ class SchemaConfig(BaseModel):
     searchable_fields: list[str] = Field(default_factory=list, description="Fields to include in search")
     filterable_fields: list[str] = Field(default_factory=list, description="Fields to use for filtering")
     facetable_fields: list[str] = Field(default_factory=list, description="Fields to use for faceting")
+    retrievable_fields: list[str] = Field(default_factory=list, description="Fields to return in search results")
+    completable_fields: list[str] = Field(default_factory=list, description="Fields to use for autocomplete")
+    indexable_fields: list[str] = Field(default_factory=list, description="Fields to include in search index")
+
+
+class BigQueryConfig(BaseModel):
+    """Configuration for BigQuery data source."""
+    project_id: str = Field(..., description="Google Cloud Project ID for BigQuery")
+    dataset_id: str = Field(..., description="BigQuery dataset ID")
+    table_id: str = Field(..., description="BigQuery table ID")
 
 
 class AppConfig(BaseModel):
@@ -42,6 +52,7 @@ class AppConfig(BaseModel):
     
     vertex_ai: VertexAIConfig
     schema_config: SchemaConfig = Field(alias="schema")
+    bigquery: Optional[BigQueryConfig] = Field(None, description="BigQuery data source configuration")
     data_directory: Path = Field(default=Path("data"), description="Directory for data files")
     output_directory: Path = Field(default=Path("output"), description="Directory for output files")
     batch_size: int = Field(default=100, description="Batch size for operations")
@@ -76,12 +87,24 @@ class AppConfig(BaseModel):
             content_field=os.getenv("SCHEMA_CONTENT_FIELD"),
             searchable_fields=os.getenv("SCHEMA_SEARCHABLE_FIELDS", "").split(",") if os.getenv("SCHEMA_SEARCHABLE_FIELDS") else [],
             filterable_fields=os.getenv("SCHEMA_FILTERABLE_FIELDS", "").split(",") if os.getenv("SCHEMA_FILTERABLE_FIELDS") else [],
-            facetable_fields=os.getenv("SCHEMA_FACETABLE_FIELDS", "").split(",") if os.getenv("SCHEMA_FACETABLE_FIELDS") else []
+            facetable_fields=os.getenv("SCHEMA_FACETABLE_FIELDS", "").split(",") if os.getenv("SCHEMA_FACETABLE_FIELDS") else [],
+            retrievable_fields=os.getenv("SCHEMA_RETRIEVABLE_FIELDS", "").split(",") if os.getenv("SCHEMA_RETRIEVABLE_FIELDS") else [],
+            completable_fields=os.getenv("SCHEMA_COMPLETABLE_FIELDS", "").split(",") if os.getenv("SCHEMA_COMPLETABLE_FIELDS") else [],
+            indexable_fields=os.getenv("SCHEMA_INDEXABLE_FIELDS", "").split(",") if os.getenv("SCHEMA_INDEXABLE_FIELDS") else []
         )
         
+        bigquery_config = None
+        if os.getenv("BIGQUERY_PROJECT_ID"):
+            bigquery_config = BigQueryConfig(
+                project_id=os.getenv("BIGQUERY_PROJECT_ID", ""),
+                dataset_id=os.getenv("BIGQUERY_DATASET_ID", ""),
+                table_id=os.getenv("BIGQUERY_TABLE_ID", "")
+            )
+
         return cls(
             vertex_ai=vertex_config,
             schema_config=schema_config,
+            bigquery=bigquery_config,
             data_directory=Path(os.getenv("DATA_DIRECTORY", "data")),
             output_directory=Path(os.getenv("OUTPUT_DIRECTORY", "output")),
             batch_size=int(os.getenv("BATCH_SIZE", "100")),

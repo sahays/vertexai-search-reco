@@ -195,6 +195,351 @@ To use your own content schema:
 }
 ```
 
+## BigQuery Data Ingestion
+
+The BigQuery data ingestion feature allows you to load your JSON data directly into Google BigQuery tables, which can
+then be used as a data source for Vertex AI Search and Recommendations.
+
+### Why Use BigQuery as a Data Source?
+
+- **Scalability**: Handle massive datasets efficiently
+- **Query Performance**: Fast SQL-based data analysis and transformation
+- **Data Integration**: Combine multiple data sources easily
+- **Cost Efficiency**: Pay only for data processed and stored
+- **Real-time Updates**: Stream data updates for dynamic content
+
+### Configuration Setup
+
+First, add BigQuery configuration to your config file:
+
+```json
+{
+	"vertex_ai": {
+		"project_id": "your-gcp-project-id",
+		"location": "global"
+	},
+	"bigquery": {
+		"project_id": "your-bigquery-project-id",
+		"dataset_id": "your_dataset_id",
+		"table_id": "your_table_id"
+	},
+	"schema": {
+		"schema_file": "your_schema.json"
+	}
+}
+```
+
+### Loading Data into BigQuery
+
+#### Step 1: Load JSON Data to BigQuery Table
+
+```bash
+# Load JSON data file into BigQuery table
+vertex-search --config my_config.json bq load dataset_id.table_id path/to/data.json
+
+# Replace existing table data
+vertex-search --config my_config.json bq load dataset_id.table_id path/to/data.json --replace
+```
+
+**What this does:**
+
+- Automatically creates the dataset if it doesn't exist
+- Converts JSON array to JSONL format (required by BigQuery)
+- Uses auto-schema detection for table structure
+- Loads data with write disposition (append or replace)
+
+#### Step 2: Import from BigQuery to Vertex AI
+
+```bash
+# Create data store for BigQuery import
+vertex-search --config my_config.json datastore create my-datastore-bq --display-name "BigQuery Data Store" --solution-type SEARCH
+
+# Import data from BigQuery table (without field settings)
+vertex-search --config my_config.json datastore import-bq my-datastore-bq --wait --skip-schema-update
+
+# Optionally apply field settings from config (separate step)
+vertex-search --config my_config.json datastore update-schema my-datastore-bq
+```
+
+### BigQuery Data Workflow Example
+
+Complete workflow from JSON file to searchable data store:
+
+```bash
+# 1. Load data into BigQuery with Vertex AI compatible schema
+vertex-search --config my_config.json bq load media_content.movies path/to/movies.json --replace
+
+# 2. Verify BigQuery table schema (optional)
+vertex-search --config my_config.json bq schema media_content.movies
+
+# 3. Create Vertex AI data store
+vertex-search --config my_config.json datastore create movies-datastore --display-name "Movies Search Store"
+
+# 4. Import from BigQuery to Vertex AI
+vertex-search --config my_config.json datastore import-bq movies-datastore --wait --skip-schema-update
+
+# 5. Apply field settings from config (optional, separate step)
+vertex-search --config my_config.json datastore update-schema movies-datastore
+
+# 6. Create search engine
+vertex-search --config my_config.json search create-engine movies-engine movies-datastore --display-name "Movies Search Engine"
+
+# 7. Test search
+vertex-search --config my_config.json search query "action movies" --engine-id movies-engine
+```
+
+### BigQuery vs Cloud Storage Import
+
+| Feature                 | BigQuery Import                     | Cloud Storage Import        |
+| ----------------------- | ----------------------------------- | --------------------------- |
+| **Best for**            | Large datasets, SQL transformations | Simple file-based imports   |
+| **Data transformation** | SQL queries, joins, aggregations    | File format conversion only |
+| **Scalability**         | Petabyte scale                      | Limited by file size        |
+| **Cost**                | Query-based pricing                 | Storage-based pricing       |
+| **Real-time updates**   | Streaming inserts                   | Manual file uploads         |
+| **Setup complexity**    | Moderate (requires BQ setup)        | Simple                      |
+
+### BigQuery Best Practices
+
+1. **Schema Design**: Use consistent field names and types across tables
+2. **Partitioning**: Partition large tables by date or category for better performance
+3. **Data Cleaning**: Use SQL to clean and transform data before Vertex AI import
+4. **Cost Management**: Monitor query costs and optimize table structures
+5. **Security**: Use proper IAM roles and dataset-level permissions
+
+### Advanced BigQuery Integration
+
+You can also use SQL transformations before importing to Vertex AI:
+
+```sql
+-- Example: Transform and clean data in BigQuery
+SELECT
+  id,
+  title,
+  ARRAY_TO_STRING(genres, ', ') as genre_string,
+  CAST(duration_minutes * 60 AS INT64) as duration_seconds,
+  STRUCT(
+    mpaa_rating,
+    viewer_rating
+  ) as rating
+FROM `your-project.dataset.raw_movies`
+WHERE title IS NOT NULL
+  AND LENGTH(title) > 0
+```
+
+Then update your BigQuery table with the transformed data before importing to Vertex AI.
+
+## Schema Field Settings
+
+The schema field settings feature allows you to automatically configure how Vertex AI Search uses your fields through
+configuration files. This eliminates the need for manual field configuration in the Google Cloud Console.
+
+### Overview
+
+Field settings determine how Vertex AI Search processes and returns your data fields:
+
+- **Retrievable**: Fields returned in search results (max 50 fields)
+- **Searchable**: Fields included in search queries
+- **Facetable**: Fields used for filtering and faceting
+- **Completable**: Fields used for autocomplete suggestions
+- **Indexable**: Fields included in the search index
+
+### Configuration Format
+
+Add field settings to your config file under the `schema` section:
+
+```json
+{
+	"schema": {
+		"schema_file": "your_schema.json",
+		"retrievable_fields": [
+			"id",
+			"title",
+			"description",
+			"genre",
+			"actors",
+			"director",
+			"duration_seconds",
+			"rating",
+			"language",
+			"release_date"
+		],
+		"searchable_fields": ["title", "description", "actors", "director", "keywords", "genre"],
+		"facetable_fields": ["genre", "language", "content_type", "rating.mpaa_rating"],
+		"completable_fields": ["title", "actors", "director"],
+		"indexable_fields": ["title", "description", "actors", "director", "keywords", "genre"]
+	}
+}
+```
+
+### Automatic Field Setting Application
+
+Field settings are automatically applied after successful data imports:
+
+```bash
+# Import with automatic field settings application
+vertex-search --config my_config.json datastore import-gcs my-datastore gs://bucket/* --wait
+
+# Output:
+# ✓ Import completed successfully
+# Applying field settings from config...
+# ✓ Field settings applied from config
+# Set 10 fields as retrievable: ['id', 'title', 'description', ...]
+# Set 6 fields as searchable: ['title', 'description', 'actors', ...]
+# Set 4 fields as facetable: ['genre', 'language', 'content_type', ...]
+```
+
+### Manual Field Settings Update
+
+You can also apply field settings manually to existing data stores:
+
+```bash
+# Apply field settings from config to existing data store
+vertex-search --config my_config.json datastore update-schema my-existing-datastore
+
+# Output:
+# ✓ Field settings applied to data store 'my-existing-datastore'
+# Note: Schema re-indexing will occur automatically. This may take time for large datasets.
+```
+
+### Separating Import and Field Settings (Recommended)
+
+It's recommended to separate data import and field settings application for better control:
+
+```bash
+# Import without automatic field settings (recommended)
+vertex-search --config my_config.json datastore import-gcs my-datastore gs://bucket/* --wait --skip-schema-update
+
+# Output:
+# ✓ Import completed successfully
+# ℹ Schema update skipped (use datastore update-schema to apply field settings)
+
+# Apply field settings as separate step when ready
+vertex-search --config my_config.json datastore update-schema my-datastore
+```
+
+**Benefits of separating:**
+
+- **Better error handling**: Import success isn't affected by field setting issues
+- **Flexible timing**: Apply field settings when convenient
+- **Array field support**: Handle complex field types that may not support all annotations
+- **Easier troubleshooting**: Debug import vs. schema configuration issues independently
+
+### Field Settings Validation
+
+The system validates your field settings configuration:
+
+- **Field Existence**: Warns about configured fields not found in schema
+- **Type Compatibility**: Ensures field types support the requested settings
+- **Limits**: Respects Vertex AI limits (e.g., max 50 retrievable fields)
+- **Changes Tracking**: Reports which fields were updated
+
+### Best Practices for Field Settings
+
+#### 1. **Retrievable Fields Strategy**
+
+```json
+{
+	"retrievable_fields": [
+		"id", // Always include ID
+		"title", // Essential for display
+		"description", // Content preview
+		"thumbnail_url", // Visual elements
+		"genre", // Category information
+		"rating", // Quality indicators
+		"duration" // User-relevant metadata
+	]
+}
+```
+
+#### 2. **Searchable Fields Optimization**
+
+```json
+{
+	"searchable_fields": [
+		"title", // Primary search target
+		"description", // Content-based search
+		"actors", // People search
+		"keywords", // Tag-based search
+		"genre" // Category search
+	]
+}
+```
+
+#### 3. **Facetable Fields for Filtering**
+
+```json
+{
+	"facetable_fields": [
+		"genre", // Category filters
+		"language", // Language filters
+		"content_type", // Type filters
+		"rating.mpaa_rating", // Nested field filtering
+		"release_year" // Time-based filtering
+	]
+}
+```
+
+### Environment Variable Configuration
+
+You can also configure field settings via environment variables:
+
+```bash
+export SCHEMA_RETRIEVABLE_FIELDS="id,title,description,genre"
+export SCHEMA_SEARCHABLE_FIELDS="title,description,actors"
+export SCHEMA_FACETABLE_FIELDS="genre,language,content_type"
+export SCHEMA_COMPLETABLE_FIELDS="title,actors"
+export SCHEMA_INDEXABLE_FIELDS="title,description,keywords"
+```
+
+### Field Settings Impact
+
+**Before Field Settings** (default behavior):
+
+- Only basic fields returned in search results
+- Limited filtering options
+- Poor autocomplete experience
+- Missing content in search responses
+
+**After Field Settings** (configured):
+
+- Rich search results with all relevant data
+- Dynamic filtering UI with facets
+- Intelligent autocomplete suggestions
+- Complete field data in API responses
+
+### Troubleshooting Field Settings
+
+#### Common Issues:
+
+1. **Fields Not Appearing in Results**
+
+   ```bash
+   # Check if fields are marked as retrievable
+   # Solution: Add fields to retrievable_fields in config
+   ```
+
+2. **Search Not Finding Content**
+
+   ```bash
+   # Check if fields are marked as searchable
+   # Solution: Add fields to searchable_fields in config
+   ```
+
+3. **Missing Filter Options**
+
+   ```bash
+   # Check if fields are marked as facetable
+   # Solution: Add fields to facetable_fields in config
+   ```
+
+4. **Schema Update Failures**
+   ```bash
+   # Check field names match your JSON schema exactly
+   # Check field types support the requested settings
+   # Verify you haven't exceeded limits (max 50 retrievable fields)
+   ```
+
 ## Search Workflow
 
 The search workflow enables query-based content discovery with advanced filtering and faceting capabilities.
@@ -813,13 +1158,26 @@ vertex-search --config <config_file> datastore create <data_store_id> [--display
 vertex-search --config <config_file> datastore upload-gcs <data_file> <bucket_name> [--create-bucket] [--folder path]
 
 # Import from Cloud Storage (RECOMMENDED)
-vertex-search --config <config_file> datastore import-gcs <data_store_id> <gcs_uri> [--wait]
+vertex-search --config <config_file> datastore import-gcs <data_store_id> <gcs_uri> [--wait] [--skip-schema-update]
+
+# Import from BigQuery
+vertex-search --config <config_file> datastore import-bq <data_store_id> [--wait] [--skip-schema-update]
 
 # List documents to verify import
 vertex-search --config <config_file> datastore list <data_store_id> [--count 10]
 
+# Apply field settings from config to existing data store
+vertex-search --config <config_file> datastore update-schema <data_store_id>
+
 # Legacy inline import (NOT RECOMMENDED)
-vertex-search --config <config_file> datastore import <data_store_id> <data_file> [--wait]
+vertex-search --config <config_file> datastore import <data_store_id> <data_file> [--wait] [--skip-schema-update]
+```
+
+### BigQuery Commands
+
+```bash
+# Load JSON data into BigQuery table
+vertex-search --config <config_file> bq load <dataset_id>.<table_id> <data_file> [--replace]
 ```
 
 ### Search Commands
@@ -857,9 +1215,16 @@ vertex-search --config <config_file> recommend get --user-id <id> [--event-type 
 #### Data Workflow Examples
 
 ```bash
-# Recommended data workflow
+# Cloud Storage workflow (recommended)
 vertex-search --config my_config.json datastore upload-gcs examples/sample_data.json my-bucket --create-bucket
-vertex-search --config my_config.json datastore import-gcs my-datastore gs://my-bucket/vertex-ai-search/* --wait
+vertex-search --config my_config.json datastore import-gcs my-datastore gs://my-bucket/vertex-ai-search/* --wait --skip-schema-update
+vertex-search --config my_config.json datastore update-schema my-datastore  # Apply field settings separately
+vertex-search --config my_config.json datastore list my-datastore --count 5
+
+# BigQuery workflow
+vertex-search --config my_config.json bq load dataset.table examples/sample_data.json --replace
+vertex-search --config my_config.json datastore import-bq my-datastore --wait --skip-schema-update
+vertex-search --config my_config.json datastore update-schema my-datastore  # Apply field settings separately
 vertex-search --config my_config.json datastore list my-datastore --count 5
 ```
 

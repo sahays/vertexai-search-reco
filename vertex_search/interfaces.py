@@ -4,6 +4,8 @@ from abc import ABC, abstractmethod
 from typing import Dict, Any, List, Optional, Iterator
 from pathlib import Path
 
+from .config import BigQueryConfig
+
 
 class DatasetManagerInterface(ABC):
     """Interface for managing datasets with custom schemas."""
@@ -50,6 +52,11 @@ class MediaAssetManagerInterface(ABC):
     @abstractmethod
     def delete_data_store(self, data_store_id: str) -> bool:
         """Delete a data store."""
+        pass
+
+    @abstractmethod
+    def import_from_bigquery(self, data_store_id: str, bq_config: BigQueryConfig) -> str:
+        """Import documents from BigQuery. Returns operation ID."""
         pass
 
 
