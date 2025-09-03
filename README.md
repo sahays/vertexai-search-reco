@@ -426,33 +426,39 @@ vertex-search --config my_config.json recommend get \
 
 ### Supported Media Event Types
 
-Based on official Google Cloud documentation, these are the supported event types for Vertex AI Recommendations for Media:
+Based on official Google Cloud documentation, these are the supported event types for Vertex AI Recommendations for
+Media:
 
 #### Core Event Types
+
 - `view-item` - Views details of a document/media item
 - `view-home-page` - Views home page (required for "Recommended for You" on home page context)
 - `search` - Searches the data store
-- `media-play` - Clicks play on a media item 
+- `media-play` - Clicks play on a media item
 - `media-complete` - Stops playing a media item, signifying the end of watching (requires `mediaProgressDuration`)
 
 #### Event Requirements by Recommendation Type
 
 **Others You May Like:**
+
 - Click-through rate: `view-item` OR `media-play`
 - Conversion rate: `media-complete` AND (`media-play` OR `view-item`)
 - Watch duration: `media-complete` AND (`media-play` OR `view-item`)
 
 **Recommended for You:**
+
 - Click-through rate: `view-item`, `media-play`, and `view-home-page` (for home page)
 - Conversion rate: (`media-play` OR `view-item`), `media-complete`, and `view-home-page` (for home page)
 - Watch duration: (`media-play` OR `view-item`), `media-complete`, and `view-home-page` (for home page)
 
 **More Like This:**
+
 - Click-through rate: `view-item` OR `media-play`
 - Conversion rate: (`media-play` OR `view-item`) AND `media-complete`
 - Watch duration: (`media-play` OR `view-item`) AND `media-complete`
 
 **Most Popular:**
+
 - Click-through rate: `view-item` OR `media-play`
 - Conversion rate: `media-complete`
 
@@ -626,7 +632,40 @@ OSError: Project was not passed and could not be determined from the environment
 3. **Try broader search terms**
 4. **Check if facet filters are too restrictive**
 
-#### 5. Configuration File Issues
+#### 5. Missing Fields in Search Results
+
+**Issue:** Your search query is successful, but the returned documents are missing fields (e.g., `title`, `description`)
+that you know are in the source data.
+
+**Cause:** By default, Vertex AI Search **indexes** your data for searching but does not automatically **store** every
+field for retrieval in the search response. This is an optimization to keep search results fast and lightweight.
+
+**Solution:** You must manually configure which fields should be returned in the search results by marking them as
+"Retrievable" in the Google Cloud Console.
+
+1.  **Navigate to Vertex AI Search:**
+
+    - Open the [Google Cloud Console](https://console.cloud.google.com/).
+    - In the navigation menu, go to **Vertex AI Search and Conversation**.
+
+2.  **Select Your Data Store:**
+
+    - Go to the **Data Stores** section.
+    - Click on the name of your data store.
+
+3.  **Edit Schema and Enable Retrievability:**
+
+    - You will see a list of the fields that Vertex AI has detected from your data.
+    - For each field that you want to be returned in the search results, check the **"Retrievable"** checkbox.
+    - It is also a good practice to verify that the "Searchable", "Filterable", and "Facetable" options are set
+      correctly for your needs.
+
+4.  **Save and Wait:**
+    - Save your changes.
+    - **Important:** It may take some time (from a few minutes to over an hour) for the changes to be applied and the
+      data to be re-processed. You may need to wait before the fields start appearing in your search results.
+
+#### 6. Configuration File Issues
 
 **Error:** Invalid configuration or missing fields
 
@@ -664,7 +703,8 @@ OSError: Project was not passed and could not be determined from the environment
 
 2. **Wrong solution type:** Ensure recommendation datastore and engine use `RECOMMENDATION` solution type
 3. **Insufficient data:** Recommendations need time and data to train (typically 2+ weeks)
-4. **Invalid event types:** Use supported event types like `media-play`, `media-complete`, `view-item`, `search`, `view-home-page`
+4. **Invalid event types:** Use supported event types like `media-play`, `media-complete`, `view-item`, `search`,
+   `view-home-page`
 5. **Missing media info:** For `media-complete` events, ensure media progress information is included (automatically
    added if not specified)
 
@@ -813,7 +853,7 @@ vertex-search --config my_config.json recommend record --user-id user123 --event
 # Record partial viewing (1 minute, 50%)
 vertex-search --config my_config.json recommend record --user-id user123 --event-type media-complete --document-id drama-003 --data-store-id my-datastore-reco --media-progress-duration 60.0 --media-progress-percentage 0.5
 
-# Record user viewing item details  
+# Record user viewing item details
 vertex-search --config my_config.json recommend record --user-id user123 --event-type view-item --document-id drama-005 --data-store-id my-datastore-reco
 
 # Record home page view

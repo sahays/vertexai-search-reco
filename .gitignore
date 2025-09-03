@@ -3,6 +3,12 @@ __pycache__/
 *.py[codz]
 *$py.class
 
+customer_*
+customer_config.json
+customer_schema.json
+
+test_*
+
 .env*
 my_config.json
 output/
