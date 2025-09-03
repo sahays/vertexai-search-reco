@@ -7,7 +7,7 @@ customer_*
 customer_config.json
 customer_schema.json
 
-test_*
+output_*.json
 
 .env*
 my_config.json
