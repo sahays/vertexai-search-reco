@@ -148,6 +148,31 @@ Prepare your own JSON data file following these requirements:
 ]
 ```
 
+### Option 3: Clean Your Data (Recommended)
+
+Before uploading your data to Vertex AI, it is crucial to ensure it is clean and consistent. Inconsistent data types or
+the use of placeholder strings like `"NULL"` can cause the import process to fail or lead to fields being dropped during
+indexing.
+
+This project includes a schema-aware script to automatically clean your data file.
+
+**What the script does:**
+
+- Replaces string `"NULL"` values with their correct, type-safe equivalents based on your schema (e.g., `[]` for arrays,
+  `null` for other types).
+- Fixes fields that should be arrays but are not (e.g., a field with a value of `""` that should be `[]`).
+
+**How to use the script:**
+
+1.  **Prepare your schema and data files.**
+2.  Run the following command, providing the paths to your schema, your source data file, and the desired output file.
+
+```bash
+python clean_data.py path/to/your_schema.json path/to/your_data.json path/to/cleaned_data.json
+```
+
+Always use the cleaned data file for the upload and import steps that follow.
+
 ### Custom Schema Setup
 
 To use your own content schema:
