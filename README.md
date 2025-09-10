@@ -257,8 +257,7 @@ vertex-search --config my_config.json datastore create my-datastore-bq --display
 # Import data from BigQuery table (without field settings)
 vertex-search --config my_config.json datastore import-bq my-datastore-bq --wait --skip-schema-update
 
-# Optionally apply field settings from config (separate step)
-vertex-search --config my_config.json datastore update-schema my-datastore-bq
+# Field settings must be configured manually in Google Cloud Console
 ```
 
 ### BigQuery Data Workflow Example
@@ -278,8 +277,7 @@ vertex-search --config my_config.json datastore create movies-datastore --displa
 # 4. Import from BigQuery to Vertex AI
 vertex-search --config my_config.json datastore import-bq movies-datastore --wait --skip-schema-update
 
-# 5. Apply field settings from config (optional, separate step)
-vertex-search --config my_config.json datastore update-schema movies-datastore
+# 5. Configure field settings manually in Google Cloud Console
 
 # 6. Create search engine
 vertex-search --config my_config.json search create-engine movies-engine movies-datastore --display-name "Movies Search Engine"
@@ -394,12 +392,9 @@ vertex-search --config my_config.json datastore import-gcs my-datastore gs://buc
 You can also apply field settings manually to existing data stores:
 
 ```bash
-# Apply field settings from config to existing data store
-vertex-search --config my_config.json datastore update-schema my-existing-datastore
-
-# Output:
-# ✓ Field settings applied to data store 'my-existing-datastore'
-# Note: Schema re-indexing will occur automatically. This may take time for large datasets.
+# Configure field settings manually in Google Cloud Console
+# Navigate to: Vertex AI Search → Data Stores → [your-datastore] → Schema tab
+# Check the appropriate boxes for Indexable, Searchable, etc. for each field
 ```
 
 ### Separating Import and Field Settings (Recommended)
@@ -412,10 +407,9 @@ vertex-search --config my_config.json datastore import-gcs my-datastore gs://buc
 
 # Output:
 # ✓ Import completed successfully
-# ℹ Schema update skipped (use datastore update-schema to apply field settings)
+# ℹ Schema update skipped (configure field settings manually in Google Cloud Console)
 
-# Apply field settings as separate step when ready
-vertex-search --config my_config.json datastore update-schema my-datastore
+# Configure field settings manually in Google Cloud Console when ready
 ```
 
 **Benefits of separating:**
@@ -611,18 +605,139 @@ vertex-search --config my_config.json search query "drama" \
 - **Pagination**: Support for large result sets
 - **Highlighting**: Search term highlighting in results
 
-### Search Filter Syntax
+### Advanced Search Filtering
+
+The search system supports powerful filtering capabilities for different field types. Filters must be applied to fields
+that are configured as **indexable** in your schema.
+
+#### String Field Filtering
+
+```bash
+# Single value - exact match using ANY() syntax
+--filters '{"audio_lang": "hi"}'
+
+# Multiple values - OR logic using ANY() syntax
+--filters '{"genre": ["romantic_drama", "family_drama"]}'
+
+# Combine multiple fields - AND logic
+--filters '{"genre": ["drama"], "audio_lang": "en"}'
+```
+
+#### Datetime Field Filtering
+
+For datetime fields (with `"format": "date-time"` in schema), use comparison operators:
+
+```bash
+# Exact date match
+--filters '{"c_releasedate": "2025-06-16"}'
+
+# Date range using multiple operators (between dates)
+--filters '{"c_releasedate": {">=": "2025-01-01", "<=": "2025-12-31"}}'
+
+# Greater than (after a date)
+--filters '{"c_releasedate": {">": "2025-06-15T23:59:59Z"}}'
+
+# Less than (before a date)
+--filters '{"c_releasedate": {"<": "2025-07-01"}}'
+
+# Greater than or equal to (on or after)
+--filters '{"c_releasedate": {">=": "2025-06-01"}}'
+
+# Less than or equal to (up to and including)
+--filters '{"c_releasedate": {"<=": "2025-06-30T23:59:59Z"}}'
+```
+
+**Supported Date Formats:**
+
+- `"2025"` - Any time in 2025
+- `"2025-06-16"` - Any time on June 16, 2025
+- `"2025-06-16T12:00:00Z"` - Specific time with UTC timezone
+- `"2025-06-16T12:00:00-07:00"` - Specific time with timezone offset
+
+**Datetime Comparison Operators:**
+
+- `=` : Equal to (exact match)
+- `>` : Greater than (after)
+- `>=` : Greater than or equal to (on or after)
+- `<` : Less than (before)
+- `<=` : Less than or equal to (up to and including)
+
+#### Numeric Field Filtering
+
+```bash
+# Exact numeric match
+--filters '{"duration_seconds": 120}'
+
+# Numeric comparison (if field supports it)
+--filters '{"rating": {">": 7.0}}'
+```
+
+#### Boolean Field Filtering
+
+```bash
+# Boolean values
+--filters '{"verified": true}'
+--filters '{"premium_content": false}'
+```
+
+#### Complex Filter Examples
+
+```bash
+# Find Hindi dramas released in 2025
+vertex-search --config my_config.json search query "love story" \
+  --engine-id my-engine \
+  --filters '{"audio_lang": "hi", "c_releasedate": {">=": "2025-01-01", "<": "2026-01-01"}}'
+
+# Find content released between June 1-30, 2025 with multiple genres
+vertex-search --config my_config.json search query "drama" \
+  --engine-id my-engine \
+  --filters '{"c_releasedate": {">=": "2025-06-01", "<": "2025-07-01"}, "genre": ["drama", "romantic_drama"]}'
+
+# Find recent premium content
+vertex-search --config my_config.json search query "thriller" \
+  --engine-id my-engine \
+  --filters '{"c_releasedate": {">": "2025-01-01"}, "premium": true, "audio_lang": "en"}'
+```
+
+#### Filter Syntax Reference
 
 ```json
 {
-	"genre": ["romantic_drama", "family_drama"], // Array values (OR logic)
-	"content_type": "custom", // String exact match
-	"duration_seconds": 120, // Numeric value
-	"rating.mpaa_rating": ["PG", "PG-13"], // Nested field array
-	"creator_info.verified": true, // Boolean value
-	"audience_metrics.view_count": 1000 // Nested numeric field
+	"string_field": "exact_value", // String exact match
+	"string_array": ["value1", "value2"], // String array (OR logic)
+	"datetime_field": "2025-06-16", // Datetime exact match
+	"datetime_field": { ">=": "2025-01-01", "<": "2026-01-01" }, // Datetime range
+	"numeric_field": 42, // Numeric exact match
+	"boolean_field": true, // Boolean value
+	"nested.field": "value", // Nested field access
+	"nested.array": ["val1", "val2"] // Nested array field
 }
 ```
+
+#### Making Fields Filterable
+
+To enable filtering on a field, it must be configured as **indexable** in your Vertex AI data store schema:
+
+1. **Via Google Cloud Console** (Manual):
+   - Navigate to Vertex AI Search and Conversation in Google Cloud Console
+   - Go to Data Stores → Select your data store → Schema tab
+   - Check the "Indexable" checkbox for fields you want to filter on
+
+2. **Verify Configuration**: Fields must show as "Indexable" in the Vertex AI Search console under your data store's Schema tab to be filterable.
+
+#### Filter Troubleshooting
+
+**Common Issues:**
+
+- `Unsupported field "fieldname" on ":" operator` → Field is not marked as indexable
+- `Invalid filter syntax` → Check JSON syntax and operator usage
+- No results → Verify data contains values matching your filter criteria
+
+**Solutions:**
+
+- Manually configure fields as "Indexable" in the Google Cloud Console under your data store's Schema tab
+- Use exact field names as they appear in your data
+- For datetime fields, ensure proper ISO 8601 format
 
 ## Autocomplete Workflow
 
@@ -1166,8 +1281,7 @@ vertex-search --config <config_file> datastore import-bq <data_store_id> [--wait
 # List documents to verify import
 vertex-search --config <config_file> datastore list <data_store_id> [--count 10]
 
-# Apply field settings from config to existing data store
-vertex-search --config <config_file> datastore update-schema <data_store_id>
+# Configure field settings manually in Google Cloud Console
 
 # Legacy inline import (NOT RECOMMENDED)
 vertex-search --config <config_file> datastore import <data_store_id> <data_file> [--wait] [--skip-schema-update]
@@ -1218,13 +1332,13 @@ vertex-search --config <config_file> recommend get --user-id <id> [--event-type 
 # Cloud Storage workflow (recommended)
 vertex-search --config my_config.json datastore upload-gcs examples/sample_data.json my-bucket --create-bucket
 vertex-search --config my_config.json datastore import-gcs my-datastore gs://my-bucket/vertex-ai-search/* --wait --skip-schema-update
-vertex-search --config my_config.json datastore update-schema my-datastore  # Apply field settings separately
+  # Configure field settings manually in Google Cloud Console
 vertex-search --config my_config.json datastore list my-datastore --count 5
 
 # BigQuery workflow
 vertex-search --config my_config.json bq load dataset.table examples/sample_data.json --replace
 vertex-search --config my_config.json datastore import-bq my-datastore --wait --skip-schema-update
-vertex-search --config my_config.json datastore update-schema my-datastore  # Apply field settings separately
+  # Configure field settings manually in Google Cloud Console
 vertex-search --config my_config.json datastore list my-datastore --count 5
 ```
 

@@ -171,6 +171,9 @@ class SearchManager(SearchManagerInterface):
             # and ensure the result is fully JSON serializable.
             response_dict = MessageToDict(response._pb)
 
+            # Parse JSON string fields back to proper objects/arrays for BigQuery data
+            response_dict = self._parse_json_fields(response_dict)
+
             logger.debug(
                 f"Search returned {len(response_dict.get('results', []))} results."
             )
@@ -328,3 +331,34 @@ class SearchManager(SearchManagerInterface):
         result = " AND ".join(filter_parts)
         logger.debug(f"Built direct filter string: {result}")
         return result
+    
+    def _parse_json_fields(self, response_dict: Dict[str, Any]) -> Dict[str, Any]:
+        """Parse JSON string fields back to proper objects/arrays for BigQuery data."""
+        import json
+        
+        if 'results' not in response_dict:
+            return response_dict
+        
+        # Fields that are commonly stored as JSON strings in BigQuery but should be objects/arrays
+        json_fields = [
+            'genre', 'category', 'content_language', 'actors', 'tags', 
+            'subtitle_lang', 'rights', 'directors', 'country_meta', 'extended'
+        ]
+        
+        for search_result in response_dict['results']:
+            if 'document' in search_result and 'structData' in search_result['document']:
+                struct_data = search_result['document']['structData']
+                
+                for field in json_fields:
+                    if field in struct_data and isinstance(struct_data[field], str):
+                        try:
+                            # Parse JSON string back to object/array
+                            parsed_value = json.loads(struct_data[field])
+                            struct_data[field] = parsed_value
+                            logger.debug(f"Parsed JSON field '{field}' from string to {type(parsed_value).__name__}")
+                        except (json.JSONDecodeError, TypeError) as e:
+                            # Keep original value if parsing fails
+                            logger.debug(f"Could not parse field '{field}' as JSON: {e}")
+                            pass
+        
+        return response_dict
