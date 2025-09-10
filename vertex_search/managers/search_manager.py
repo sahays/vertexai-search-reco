@@ -355,7 +355,7 @@ class SearchManager(SearchManagerInterface):
                             # Parse JSON string back to object/array
                             parsed_value = json.loads(struct_data[field])
                             struct_data[field] = parsed_value
-                            logger.debug(f"Parsed JSON field '{field}' from string to {type(parsed_value).__name__}")
+                            logger.info(f"Parsed JSON field '{field}': '{struct_data[field]}' -> {parsed_value}")
                         except (json.JSONDecodeError, TypeError) as e:
                             # Keep original value if parsing fails
                             logger.debug(f"Could not parse field '{field}' as JSON: {e}")
