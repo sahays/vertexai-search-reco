@@ -340,7 +340,8 @@ class MediaAssetManager(MediaAssetManagerInterface):
                 'searchable': schema_config.searchable_fields,
                 'facetable': schema_config.facetable_fields,
                 'completable': schema_config.completable_fields,
-                'indexable': schema_config.indexable_fields
+                'indexable': schema_config.indexable_fields,
+                'filterable': schema_config.filterable_fields
             }
             
             # Skip if no field settings configured
@@ -364,34 +365,75 @@ class MediaAssetManager(MediaAssetManagerInterface):
                 
                 # Skip array fields as Vertex AI doesn't support annotations on them
                 field_type = field_spec.get("type", "")
-                if field_type == "array" or (isinstance(field_type, list) and "array" in field_type):
-                    logger.info(f"Skipping array field '{field_name}' (Vertex AI limitation)")
+                # Check for known array fields from config even if they appear as strings due to BQ conversion
+                known_array_fields = ['genre', 'actors', 'directors', 'tags', 'content_language', 'subtitle_lang', 'category', 'rights']
+                
+                if field_type == "array" or (isinstance(field_type, list) and "array" in field_type) or field_name in known_array_fields:
+                    logger.info(f"Skipping array field '{field_name}' (Vertex AI limitation) - field_type: {field_type}")
                     continue
+                
+                # Check if this is a string-compatible field for text-based operations
+                is_string_field = (
+                    field_type == "string" or 
+                    (isinstance(field_type, list) and "string" in field_type)
+                )
+                is_number_field = (
+                    field_type == "number" or 
+                    (isinstance(field_type, list) and "number" in field_type)
+                )
                 
                 # Apply retrievable setting
                 if field_name in schema_config.retrievable_fields:
                     field_spec["retrievable"] = True
                     field_updated = True
+                    logger.info(f"Set field '{field_name}' (type: {field_type}) as retrievable")
                 
-                # Apply searchable setting
+                # Apply searchable setting (only for string fields)
                 if field_name in schema_config.searchable_fields:
-                    field_spec["searchable"] = True
-                    field_updated = True
+                    if is_string_field:
+                        field_spec["searchable"] = True
+                        field_updated = True
+                        logger.info(f"Set field '{field_name}' (type: {field_type}) as searchable")
+                    else:
+                        logger.warning(f"Skipping searchable for non-string field '{field_name}' (type: {field_type})")
                 
-                # Apply facetable setting
+                # Apply dynamic facetable setting (for string, number, boolean, integer fields)
                 if field_name in schema_config.facetable_fields:
-                    field_spec["facetable"] = True
-                    field_updated = True
+                    if is_string_field or is_number_field or field_type == "boolean" or field_type == "integer" or (isinstance(field_type, list) and ("boolean" in field_type or "integer" in field_type)):
+                        # Dynamic facetable requires indexable to be true as well
+                        field_spec["dynamicFacetable"] = True
+                        field_spec["indexable"] = True
+                        field_updated = True
+                        logger.info(f"Set field '{field_name}' (type: {field_type}) as dynamicFacetable and indexable")
+                    else:
+                        logger.warning(f"Skipping dynamicFacetable for incompatible field '{field_name}' (type: {field_type})")
                 
-                # Apply completable setting
+                # Apply completable setting (only for string fields)
                 if field_name in schema_config.completable_fields:
-                    field_spec["completable"] = True
-                    field_updated = True
+                    if is_string_field:
+                        field_spec["completable"] = True
+                        field_updated = True
+                        logger.info(f"Set field '{field_name}' (type: {field_type}) as completable")
+                    else:
+                        logger.warning(f"Skipping completable for non-string field '{field_name}' (type: {field_type})")
                 
-                # Apply indexable setting
+                # Apply indexable setting (only for string fields)
                 if field_name in schema_config.indexable_fields:
-                    field_spec["indexable"] = True
-                    field_updated = True
+                    if is_string_field:
+                        field_spec["indexable"] = True
+                        field_updated = True
+                        logger.info(f"Set field '{field_name}' (type: {field_type}) as indexable")
+                    else:
+                        logger.warning(f"Skipping indexable for non-string field '{field_name}' (type: {field_type})")
+                
+                # Apply indexable setting for filterable fields (indexable enables filtering)
+                if field_name in schema_config.filterable_fields:
+                    if is_string_field or is_number_field or field_type == "boolean" or field_type == "integer" or (isinstance(field_type, list) and ("boolean" in field_type or "integer" in field_type)):
+                        field_spec["indexable"] = True
+                        field_updated = True
+                        logger.info(f"Set field '{field_name}' (type: {field_type}) as indexable (enables filtering)")
+                    else:
+                        logger.warning(f"Skipping indexable for incompatible field '{field_name}' (type: {field_type})")
                 
                 if field_updated:
                     changes_made.append(field_name)
@@ -412,13 +454,40 @@ class MediaAssetManager(MediaAssetManagerInterface):
             # Update the schema via API
             schema_name = f"projects/{self.config_manager.vertex_ai.project_id}/locations/{self.config_manager.vertex_ai.location}/collections/default_collection/dataStores/{data_store_id}/schemas/default_schema"
             
+            # Debug: log the schema being sent
+            logger.info("Schema update request:")
+            import json
+            for field_name, field_spec in properties.items():
+                if field_name in changes_made:
+                    logger.info(f"  {field_name}: {json.dumps(field_spec, indent=2)}")
+            
+            # Create Vertex AI compatible schema with required schema version
+            vertex_ai_schema = {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": properties
+            }
+            
+            logger.info("Vertex AI schema being sent:")
+            logger.info(json.dumps(vertex_ai_schema, indent=2))
+            
             schema = discoveryengine_v1beta.Schema(
                 name=schema_name,
-                struct_schema=schema_dict
+                struct_schema=vertex_ai_schema
             )
             
             request = discoveryengine_v1beta.UpdateSchemaRequest(schema=schema)
-            operation = self.schema_client.update_schema(request=request)
+            
+            # Let's try to catch more specific error information
+            try:
+                operation = self.schema_client.update_schema(request=request)
+            except Exception as e:
+                logger.error(f"Detailed error information: {type(e).__name__}")
+                logger.error(f"Error details: {str(e)}")
+                # Try to see if there are more details in the exception
+                if hasattr(e, 'details') and callable(getattr(e, 'details', None)):
+                    logger.error(f"Error details: {e.details()}")
+                raise
             
             logger.info(f"Schema update started: {operation.operation.name}")
             logger.info(f"Applied field settings to {len(changes_made)} fields: {changes_made}")

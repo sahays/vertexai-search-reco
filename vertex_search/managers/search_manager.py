@@ -203,6 +203,13 @@ class SearchManager(SearchManagerInterface):
         """Build filter string from filter dictionary using Vertex AI Discovery Engine syntax."""
         filter_parts = []
 
+        # Get schema to identify datetime fields
+        schema_dict = None
+        try:
+            schema_dict = self.config_manager.validate_schema_file()
+        except Exception:
+            logger.warning("Could not load schema for datetime field detection")
+
         for field, value in filters.items():
             # Try both with and without structData prefix based on import method
             field_paths = []
@@ -216,10 +223,31 @@ class SearchManager(SearchManagerInterface):
             # Use the first field path (we'll try different approaches)
             field_path = field_paths[0]  # Start with direct field name
 
+            # Check if this is a datetime field
+            is_datetime_field = False
+            if schema_dict and 'properties' in schema_dict:
+                field_spec = schema_dict['properties'].get(field, {})
+                is_datetime_field = field_spec.get('format') == 'date-time'
+
             if isinstance(value, str):
-                # Escape quotes in the value
-                escaped_value = value.replace('"', '\\"')
-                filter_parts.append(f'{field_path}: ANY("{escaped_value}")')
+                if is_datetime_field:
+                    # For datetime fields, use equality comparison instead of ANY()
+                    escaped_value = value.replace('"', '\\"')
+                    filter_parts.append(f'{field_path} = "{escaped_value}"')
+                    logger.info(f"Using datetime equality filter for field '{field}': {field_path} = \"{escaped_value}\"")
+                else:
+                    # For regular string fields, use ANY()
+                    escaped_value = value.replace('"', '\\"')
+                    filter_parts.append(f'{field_path}: ANY("{escaped_value}")')
+            elif isinstance(value, dict) and is_datetime_field:
+                # Handle datetime comparison operators: {">=": "2025-01-01", "<": "2025-12-31"}
+                for operator, datetime_value in value.items():
+                    if operator in ['<=', '<', '>=', '>', '=']:
+                        escaped_value = str(datetime_value).replace('"', '\\"')
+                        filter_parts.append(f'{field_path} {operator} "{escaped_value}"')
+                        logger.info(f"Using datetime comparison filter for field '{field}': {field_path} {operator} \"{escaped_value}\"")
+                    else:
+                        logger.warning(f"Unsupported datetime comparison operator '{operator}' for field '{field}'")
             elif isinstance(value, (int, float)):
                 filter_parts.append(f"{field_path} = {value}")
             elif isinstance(value, list):
@@ -245,13 +273,42 @@ class SearchManager(SearchManagerInterface):
         """Build filter string using direct field names (without structData prefix)."""
         filter_parts = []
 
+        # Get schema to identify datetime fields
+        schema_dict = None
+        try:
+            schema_dict = self.config_manager.validate_schema_file()
+        except Exception:
+            logger.warning("Could not load schema for datetime field detection")
+
         for field, value in filters.items():
             # Use field name directly without prefix
             field_path = field
 
+            # Check if this is a datetime field
+            is_datetime_field = False
+            if schema_dict and 'properties' in schema_dict:
+                field_spec = schema_dict['properties'].get(field, {})
+                is_datetime_field = field_spec.get('format') == 'date-time'
+
             if isinstance(value, str):
-                escaped_value = value.replace('"', '\\"')
-                filter_parts.append(f'{field_path}: ANY("{escaped_value}")')
+                if is_datetime_field:
+                    # For datetime fields, use equality comparison instead of ANY()
+                    escaped_value = value.replace('"', '\\"')
+                    filter_parts.append(f'{field_path} = "{escaped_value}"')
+                    logger.info(f"Using datetime equality filter for field '{field}': {field_path} = \"{escaped_value}\"")
+                else:
+                    # For regular string fields, use ANY()
+                    escaped_value = value.replace('"', '\\"')
+                    filter_parts.append(f'{field_path}: ANY("{escaped_value}")')
+            elif isinstance(value, dict) and is_datetime_field:
+                # Handle datetime comparison operators: {">=": "2025-01-01", "<": "2025-12-31"}
+                for operator, datetime_value in value.items():
+                    if operator in ['<=', '<', '>=', '>', '=']:
+                        escaped_value = str(datetime_value).replace('"', '\\"')
+                        filter_parts.append(f'{field_path} {operator} "{escaped_value}"')
+                        logger.info(f"Using datetime comparison filter for field '{field}': {field_path} {operator} \"{escaped_value}\"")
+                    else:
+                        logger.warning(f"Unsupported datetime comparison operator '{operator}' for field '{field}'")
             elif isinstance(value, (int, float)):
                 filter_parts.append(f"{field_path} = {value}")
             elif isinstance(value, list):

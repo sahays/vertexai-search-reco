@@ -9,6 +9,8 @@ customer_schema.json
 
 output_*.json
 
+.claude
+
 .env*
 my_config.json
 output/
