@@ -48,6 +48,14 @@ class MediaAssetManagerInterface(ABC):
     def get_import_status(self, operation_id: str) -> Dict[str, Any]:
         """Get the status of an import operation."""
         pass
+
+    def get_document(self, data_store_id: str, document_id: str) -> Dict[str, Any]:
+        """Get a single document from a data store."""
+        pass
+
+    def list_documents(self, data_store_id: str, page_size: int = 10) -> Dict[str, Any]:
+        """List documents in a data store."""
+        pass
     
     @abstractmethod
     def delete_data_store(self, data_store_id: str) -> bool:

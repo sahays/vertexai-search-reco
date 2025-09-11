@@ -193,6 +193,35 @@ def list_documents(ctx, data_store_id: str, count: int):
         ctx.exit(1)
 
 
+@datastore.command('get-document')
+@click.argument('data_store_id')
+@click.argument('document_id')
+@click.option('--json', 'output_json', is_flag=True, help='Output the full document as JSON.')
+@click.pass_context
+def get_document(ctx, data_store_id: str, document_id: str, output_json: bool):
+    """Get a single document from a data store to inspect its data."""
+    config_manager: ConfigManager = ctx.obj['config_manager']
+    asset_manager = MediaAssetManager(config_manager)
+    
+    try:
+        result = asset_manager.get_document(data_store_id, document_id)
+        
+        if 'error' in result:
+            console.print(f"[red]Error: {result['error']}[/red]")
+            ctx.exit(1)
+        
+        if output_json:
+            # Using print to avoid rich formatting issues with JSON
+            print(json.dumps(result, indent=2))
+        else:
+            console.print(f"[green]Document '{document_id}' from data store '{data_store_id}':[/green]")
+            console.print(result)
+            
+    except Exception as e:
+        console.print(f"[red]Error: {str(e)}[/red]")
+        ctx.exit(1)
+
+
 @datastore.command('upload-gcs')
 @click.argument('data_file', type=click.Path(exists=True, path_type=Path))
 @click.argument('bucket_name')
@@ -509,11 +538,18 @@ def search_query(ctx, query: str, engine_id: Optional[str], filters: Optional[st
             table.add_column("Title", style="green")
             table.add_column("Score", style="yellow")
             
+            id_field = config_manager.schema.id_field
+            title_field = config_manager.schema.title_field
+
             for result in results['results']:
                 doc = result.get('document', {})
+                struct_data = doc.get('structData', {})
                 score = result.get('score', 'N/A')
-                doc_id = doc.get('id', 'N/A')
-                title = doc.get('title', doc.get('name', 'N/A'))
+                
+                # Correctly get the ID and Title from structData
+                doc_id = struct_data.get(id_field, doc.get('id', 'N/A'))
+                title = struct_data.get(title_field, 'N/A')
+                
                 table.add_row(str(doc_id), str(title), str(score))
             
             console.print(table)
