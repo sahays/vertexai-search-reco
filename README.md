@@ -363,9 +363,9 @@ Add field settings to your config file under the `schema` section:
 			"release_date"
 		],
 		"searchable_fields": ["title", "description", "actors", "director", "keywords", "genre"],
+		"filterable_fields": ["genre", "language", "content_type", "rating", "year"],
 		"facetable_fields": ["genre", "language", "content_type", "rating.mpaa_rating"],
-		"completable_fields": ["title", "actors", "director"],
-		"indexable_fields": ["title", "description", "actors", "director", "keywords", "genre"]
+		"completable_fields": ["title", "actors", "director"]
 	}
 }
 ```

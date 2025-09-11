@@ -30,12 +30,12 @@ class SchemaConfig(BaseModel):
     id_field: str = Field(default="id", description="Field name for unique ID")
     title_field: str = Field(default="title", description="Field name for title/name")
     content_field: Optional[str] = Field(None, description="Field name for main content")
-    searchable_fields: list[str] = Field(default_factory=list, description="Fields to include in search")
-    filterable_fields: list[str] = Field(default_factory=list, description="Fields to use for filtering")
+    searchable_fields: list[str] = Field(default_factory=list, description="Fields to include in search (arrays auto-converted to _text)")
+    filterable_fields: list[str] = Field(default_factory=list, description="Fields to use for filtering (arrays auto-converted to _text)")
     facetable_fields: list[str] = Field(default_factory=list, description="Fields to use for faceting")
     retrievable_fields: list[str] = Field(default_factory=list, description="Fields to return in search results")
     completable_fields: list[str] = Field(default_factory=list, description="Fields to use for autocomplete")
-    indexable_fields: list[str] = Field(default_factory=list, description="Fields to include in search index")
+    # Note: indexable_fields removed - use filterable_fields instead (indexable enables filtering)
 
 
 class BigQueryConfig(BaseModel):
@@ -89,8 +89,8 @@ class AppConfig(BaseModel):
             filterable_fields=os.getenv("SCHEMA_FILTERABLE_FIELDS", "").split(",") if os.getenv("SCHEMA_FILTERABLE_FIELDS") else [],
             facetable_fields=os.getenv("SCHEMA_FACETABLE_FIELDS", "").split(",") if os.getenv("SCHEMA_FACETABLE_FIELDS") else [],
             retrievable_fields=os.getenv("SCHEMA_RETRIEVABLE_FIELDS", "").split(",") if os.getenv("SCHEMA_RETRIEVABLE_FIELDS") else [],
-            completable_fields=os.getenv("SCHEMA_COMPLETABLE_FIELDS", "").split(",") if os.getenv("SCHEMA_COMPLETABLE_FIELDS") else [],
-            indexable_fields=os.getenv("SCHEMA_INDEXABLE_FIELDS", "").split(",") if os.getenv("SCHEMA_INDEXABLE_FIELDS") else []
+            completable_fields=os.getenv("SCHEMA_COMPLETABLE_FIELDS", "").split(",") if os.getenv("SCHEMA_COMPLETABLE_FIELDS") else []
+            # Note: removed SCHEMA_INDEXABLE_FIELDS - use SCHEMA_FILTERABLE_FIELDS instead
         )
         
         bigquery_config = None

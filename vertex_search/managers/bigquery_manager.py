@@ -52,15 +52,15 @@ class BigQueryManager:
                     processed_record[id_field] = string_id
             
             # Handle data types for BigQuery/Vertex AI compatibility
-            # Keep arrays as arrays, but convert complex objects to JSON strings
+            # Keep native types and let BigQuery handle schema detection
             for field_name, field_value in processed_record.items():
                 if isinstance(field_value, list):
-                    # Keep arrays as arrays for Vertex AI compatibility
+                    # Keep arrays as native arrays for BigQuery ARRAY detection
                     # Filter out None/empty values from arrays
                     processed_record[field_name] = [item for item in field_value if item is not None and str(item).strip() != ""]
                 elif isinstance(field_value, dict):
-                    # Convert complex objects to JSON strings for BigQuery storage
-                    processed_record[field_name] = json.dumps(field_value)
+                    # Keep objects as native objects for BigQuery RECORD detection
+                    processed_record[field_name] = field_value
                 elif field_value is None:
                     # Keep None as None for NULLABLE fields
                     processed_record[field_name] = None

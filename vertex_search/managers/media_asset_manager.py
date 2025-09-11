@@ -328,181 +328,180 @@ class MediaAssetManager(MediaAssetManagerInterface):
             logger.error(f"Failed to create bucket: {str(e)}")
             return False
     
+    def get_schema(self, data_store_id: str) -> Dict[str, Any]:
+        """Get the current schema for a data store."""
+        try:
+            schema_name = f"projects/{self.config_manager.vertex_ai.project_id}/locations/{self.config_manager.vertex_ai.location}/collections/default_collection/dataStores/{data_store_id}/schemas/default_schema"
+            
+            request = discoveryengine_v1beta.GetSchemaRequest(name=schema_name)
+            schema = self.schema_client.get_schema(request=request)
+            
+            # Convert protobuf Struct to a Python dict, handling the case where it might be empty.
+            from google.protobuf.json_format import MessageToDict
+            if schema.struct_schema:
+                return MessageToDict(schema.struct_schema)
+            else:
+                # Return an empty schema structure if none exists
+                return {"properties": {}}
+            
+        except Exception as e:
+            logger.error(f"Failed to get schema: {str(e)}")
+            raise DataStoreError(f"Failed to get schema: {str(e)}") from e
+
     def apply_field_settings_from_config(self, data_store_id: str) -> bool:
         """Apply field settings from config to the data store schema."""
         try:
-            # Get the schema configuration
             schema_config = self.config_manager.schema
-            
-            # Check if any field settings are configured
             field_settings = {
-                'retrievable': schema_config.retrievable_fields,
-                'searchable': schema_config.searchable_fields,
-                'facetable': schema_config.facetable_fields,
-                'completable': schema_config.completable_fields,
-                'indexable': schema_config.indexable_fields,
-                'filterable': schema_config.filterable_fields
+                'retrievable': set(schema_config.retrievable_fields),
+                'searchable': set(schema_config.searchable_fields),
+                'facetable': set(schema_config.facetable_fields),
+                'completable': set(schema_config.completable_fields),
+                'filterable': set(schema_config.filterable_fields)
             }
-            
-            # Skip if no field settings configured
+
             if not any(field_settings.values()):
                 logger.info("No field settings configured in config - skipping schema update")
                 return True
-            
+
             logger.info("Applying field settings from config to schema...")
-            
-            # Load the JSON schema file
-            schema_dict = self.config_manager.validate_schema_file()
-            
-            # Track changes
-            changes_made = []
-            
-            # Apply field settings to schema properties
+
+            # 1. Fetch the current schema from the data store. This is the source of truth.
+            try:
+                schema_dict = self.get_schema(data_store_id)
+                logger.info("Successfully fetched existing schema from data store.")
+            except DataStoreError:
+                logger.warning("Could not fetch existing schema. Using local schema file as a base.")
+                schema_dict = self.config_manager.validate_schema_file()
+
             properties = schema_dict.get("properties", {})
-            
+            changes_made = []
+
+            # 2. Apply annotations to the fetched schema properties in memory.
             for field_name, field_spec in properties.items():
                 field_updated = False
                 
-                # Skip array fields as Vertex AI doesn't support annotations on them
+                # Determine the primary type for validation, without modifying the spec.
                 field_type = field_spec.get("type", "")
-                # Check for known array fields from config even if they appear as strings due to BQ conversion
-                known_array_fields = ['genre', 'actors', 'directors', 'tags', 'content_language', 'subtitle_lang', 'category', 'rights']
-                
-                if field_type == "array" or (isinstance(field_type, list) and "array" in field_type) or field_name in known_array_fields:
-                    logger.info(f"Skipping array field '{field_name}' (Vertex AI limitation) - field_type: {field_type}")
-                    continue
-                
-                # Check if this is a string-compatible field for text-based operations
-                is_string_field = (
-                    field_type == "string" or 
-                    (isinstance(field_type, list) and "string" in field_type)
-                )
-                is_number_field = (
-                    field_type == "number" or 
-                    (isinstance(field_type, list) and "number" in field_type)
-                )
-                
-                # Apply retrievable setting
-                if field_name in schema_config.retrievable_fields:
-                    field_spec["retrievable"] = True
+                primary_type = field_type[0] if isinstance(field_type, list) and field_type else field_type
+
+                is_string_field = primary_type == "string"
+                is_number_field = primary_type == "number"
+                is_integer_field = primary_type == "integer"
+                is_boolean_field = primary_type == "boolean"
+                is_array_field = primary_type == "array"
+
+                # --- Annotation Logic ---
+                # Retrievable
+                if field_name in field_settings['retrievable']:
+                    if primary_type in ["string", "number", "boolean", "integer"]:
+                        if not field_spec.get("retrievable"):
+                            field_spec["retrievable"] = True
+                            field_updated = True
+                elif "retrievable" in field_spec:
+                    del field_spec["retrievable"]
                     field_updated = True
-                    logger.info(f"Set field '{field_name}' (type: {field_type}) as retrievable")
                 
-                # Apply searchable setting (only for string fields)
-                if field_name in schema_config.searchable_fields:
-                    if is_string_field:
+                # Searchable (only for non-array strings)
+                if field_name in field_settings['searchable']:
+                    if is_string_field and not is_array_field and not field_spec.get("searchable"):
                         field_spec["searchable"] = True
                         field_updated = True
-                        logger.info(f"Set field '{field_name}' (type: {field_type}) as searchable")
-                    else:
-                        logger.warning(f"Skipping searchable for non-string field '{field_name}' (type: {field_type})")
-                
-                # Apply dynamic facetable setting (for string, number, boolean, integer fields)
-                if field_name in schema_config.facetable_fields:
-                    if is_string_field or is_number_field or field_type == "boolean" or field_type == "integer" or (isinstance(field_type, list) and ("boolean" in field_type or "integer" in field_type)):
-                        # Dynamic facetable requires indexable to be true as well
-                        field_spec["dynamicFacetable"] = True
+                elif "searchable" in field_spec:
+                    del field_spec["searchable"]
+                    field_updated = True
+
+                # Indexable (for filtering)
+                if field_name in field_settings['filterable']:
+                    if (is_string_field or is_number_field or is_boolean_field or is_integer_field) and not field_spec.get("indexable"):
                         field_spec["indexable"] = True
                         field_updated = True
-                        logger.info(f"Set field '{field_name}' (type: {field_type}) as dynamicFacetable and indexable")
-                    else:
-                        logger.warning(f"Skipping dynamicFacetable for incompatible field '{field_name}' (type: {field_type})")
-                
-                # Apply completable setting (only for string fields)
-                if field_name in schema_config.completable_fields:
-                    if is_string_field:
+                elif "indexable" in field_spec:
+                    del field_spec["indexable"]
+                    field_updated = True
+
+                # Dynamic Facetable
+                if field_name in field_settings['facetable']:
+                    if is_string_field and not is_array_field and not field_spec.get("dynamicFacetable"):
+                        field_spec["dynamicFacetable"] = True
+                        field_updated = True
+                elif "dynamicFacetable" in field_spec:
+                    del field_spec["dynamicFacetable"]
+                    field_updated = True
+
+                # Completable
+                if field_name in field_settings['completable']:
+                    if is_string_field and not field_spec.get("completable"):
                         field_spec["completable"] = True
                         field_updated = True
-                        logger.info(f"Set field '{field_name}' (type: {field_type}) as completable")
-                    else:
-                        logger.warning(f"Skipping completable for non-string field '{field_name}' (type: {field_type})")
-                
-                # Apply indexable setting (only for string fields)
-                if field_name in schema_config.indexable_fields:
-                    if is_string_field:
-                        field_spec["indexable"] = True
-                        field_updated = True
-                        logger.info(f"Set field '{field_name}' (type: {field_type}) as indexable")
-                    else:
-                        logger.warning(f"Skipping indexable for non-string field '{field_name}' (type: {field_type})")
-                
-                # Apply indexable setting for filterable fields (indexable enables filtering)
-                if field_name in schema_config.filterable_fields:
-                    if is_string_field or is_number_field or field_type == "boolean" or field_type == "integer" or (isinstance(field_type, list) and ("boolean" in field_type or "integer" in field_type)):
-                        field_spec["indexable"] = True
-                        field_updated = True
-                        logger.info(f"Set field '{field_name}' (type: {field_type}) as indexable (enables filtering)")
-                    else:
-                        logger.warning(f"Skipping indexable for incompatible field '{field_name}' (type: {field_type})")
+                elif "completable" in field_spec:
+                    del field_spec["completable"]
+                    field_updated = True
                 
                 if field_updated:
                     changes_made.append(field_name)
-            
-            # Validate that configured fields exist in schema
-            all_configured_fields = set()
-            for fields_list in field_settings.values():
-                all_configured_fields.update(fields_list)
-            
-            missing_fields = all_configured_fields - set(properties.keys())
-            if missing_fields:
-                logger.warning(f"Fields configured but not found in schema: {missing_fields}")
-            
+
+            # 3. Add new _text fields for array processing.
+            # This is done after annotating existing fields.
+            for field_name in list(properties.keys()):
+                field_spec = properties[field_name]
+                field_type = field_spec.get("type", "")
+                is_array = field_type == "array" or (isinstance(field_type, list) and "array" in field_type)
+
+                if is_array:
+                    if field_name in field_settings['searchable']:
+                        text_field_name = f"{field_name}_text"
+                        if text_field_name not in properties:
+                            properties[text_field_name] = {"type": "string", "description": f"Searchable text representation of {field_name} array", "searchable": True}
+                            logger.info(f"Added and marked field '{text_field_name}' as searchable.")
+                            changes_made.append(text_field_name)
+                        elif not properties[text_field_name].get("searchable"):
+                            properties[text_field_name]["searchable"] = True
+                            changes_made.append(text_field_name)
+
+                    if field_name in field_settings['filterable']:
+                        text_field_name = f"{field_name}_text"
+                        if text_field_name not in properties:
+                            properties[text_field_name] = {"type": "string", "description": f"Filterable text representation of {field_name} array", "indexable": True}
+                            logger.info(f"Added and marked field '{text_field_name}' as indexable (filterable).")
+                            changes_made.append(text_field_name)
+                        elif not properties[text_field_name].get("indexable"):
+                            properties[text_field_name]["indexable"] = True
+                            changes_made.append(text_field_name)
+
             if not changes_made:
-                logger.info("No field settings applied - all configured fields may be missing from schema")
+                logger.info("No schema changes to apply.")
                 return True
-            
-            # Update the schema via API
-            schema_name = f"projects/{self.config_manager.vertex_ai.project_id}/locations/{self.config_manager.vertex_ai.location}/collections/default_collection/dataStores/{data_store_id}/schemas/default_schema"
-            
-            # Debug: log the schema being sent
-            logger.info("Schema update request:")
-            import json
+
+            # 4. Create the final, clean schema for the API call.
+            final_properties = {}
             for field_name, field_spec in properties.items():
-                if field_name in changes_made:
-                    logger.info(f"  {field_name}: {json.dumps(field_spec, indent=2)}")
-            
-            # Create Vertex AI compatible schema with required schema version
-            vertex_ai_schema = {
-                "$schema": "https://json-schema.org/draft/2020-12/schema",
-                "type": "object",
-                "properties": properties
-            }
+                clean_spec = field_spec.copy()
+                field_type = clean_spec.get("type")
+                if isinstance(field_type, list):
+                    clean_spec["type"] = next((t for t in field_type if t != "null"), "string")
+                final_properties[field_name] = clean_spec
+
+            # --- API Update Call ---
+            schema_name = f"projects/{self.config_manager.vertex_ai.project_id}/locations/{self.config_manager.vertex_ai.location}/collections/default_collection/dataStores/{data_store_id}/schemas/default_schema"
+            vertex_ai_schema = {"$schema": "https://json-schema.org/draft/2020-12/schema", "type": "object", "properties": final_properties}
             
             logger.info("Vertex AI schema being sent:")
             logger.info(json.dumps(vertex_ai_schema, indent=2))
             
-            schema = discoveryengine_v1beta.Schema(
-                name=schema_name,
-                struct_schema=vertex_ai_schema
-            )
-            
+            schema = discoveryengine_v1beta.Schema(name=schema_name, struct_schema=vertex_ai_schema)
             request = discoveryengine_v1beta.UpdateSchemaRequest(schema=schema)
             
-            # Let's try to catch more specific error information
-            try:
-                operation = self.schema_client.update_schema(request=request)
-            except Exception as e:
-                logger.error(f"Detailed error information: {type(e).__name__}")
-                logger.error(f"Error details: {str(e)}")
-                # Try to see if there are more details in the exception
-                if hasattr(e, 'details') and callable(getattr(e, 'details', None)):
-                    logger.error(f"Error details: {e.details()}")
-                raise
-            
+            operation = self.schema_client.update_schema(request=request)
             logger.info(f"Schema update started: {operation.operation.name}")
             logger.info(f"Applied field settings to {len(changes_made)} fields: {changes_made}")
-            
-            # Log field setting summary
-            for setting_type, fields in field_settings.items():
-                if fields:
-                    applied_fields = [f for f in fields if f in changes_made]
-                    if applied_fields:
-                        logger.info(f"Set {len(applied_fields)} fields as {setting_type}: {applied_fields}")
             
             return True
             
         except Exception as e:
             logger.error(f"Failed to apply field settings from config: {str(e)}")
+            if hasattr(e, 'details') and callable(getattr(e, 'details', None)):
+                logger.error(f"Error details: {e.details()}")
             return False
 
     def delete_data_store(self, data_store_id: str) -> bool:
