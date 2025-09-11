@@ -23,7 +23,8 @@ dependencies = [
 
 [project.scripts]
 vertex-search = "vertex_search.cli:main"
+data-prep = "data_prep.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["vertex_search*"]
+include = ["vertex_search*", "data_prep*"]
