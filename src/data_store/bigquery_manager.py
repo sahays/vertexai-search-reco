@@ -7,8 +7,8 @@ from typing import Dict, Any, List
 from google.cloud import bigquery
 from google.cloud.exceptions import NotFound
 
-from ..config import ConfigManager
-from ..utils import setup_logging
+from ..shared.config import ConfigManager
+from ..shared.utils import setup_logging
 
 logger = setup_logging()
 

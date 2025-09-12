@@ -5,10 +5,10 @@ from typing import Dict, Any, List, Optional
 from google.cloud import discoveryengine_v1beta
 from google.protobuf.json_format import MessageToDict
 
-from ..config import ConfigManager
-from ..interfaces import SearchManagerInterface
-from ..utils import handle_vertex_ai_error, SearchError, setup_logging
-from ..auth import get_credentials, setup_client_options
+from ..shared.config import ConfigManager
+from ..shared.interfaces import SearchManagerInterface
+from ..shared.utils import handle_vertex_ai_error, SearchError, setup_logging
+from ..shared.auth import get_credentials, setup_client_options
 
 logger = setup_logging()
 

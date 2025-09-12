@@ -1,4 +1,4 @@
-"""Command-line interface for Vertex AI Search for Media."""
+"""Command-line interface for Data Store Management."""
 
 import click
 import json
@@ -8,16 +8,12 @@ from rich.console import Console
 from rich.table import Table
 from rich import print as rprint
 
-from .config import AppConfig, ConfigManager
-from .managers import (
-    DatasetManager, 
-    MediaAssetManager, 
-    SearchManager, 
-    AutocompleteManager, 
-    RecommendationManager,
-    BigQueryManager
-)
-from .data_generator import DataGenerator
+# Import from shared modules  
+from ..shared.config import AppConfig, ConfigManager
+from ..shared.data_generator import DataGenerator
+
+# Import domain-specific managers
+from .manager import DatasetManager, MediaAssetManager, BigQueryManager
 
 console = Console()
 
@@ -26,9 +22,41 @@ console = Console()
 @click.option('--config', type=click.Path(exists=True, path_type=Path), help='Configuration file path')
 @click.option('--schema', type=click.Path(exists=True, path_type=Path), help='JSON schema file path')
 @click.option('--project-id', envvar='VERTEX_PROJECT_ID', help='Google Cloud Project ID')
+@click.option('--output-dir', type=click.Path(path_type=Path), help='Output directory for generated files')
+@click.option('--log', is_flag=True, help='Enable verbose logging')
 @click.pass_context
-def main(ctx, config: Optional[Path], schema: Optional[Path], project_id: Optional[str]):
-    """Vertex AI Search for Media - Schema-agnostic search and recommendation CLI."""
+def main(ctx, config: Optional[Path], schema: Optional[Path], project_id: Optional[str], output_dir: Optional[Path], log: bool):
+    """Data Store Management - Dataset creation, ingestion, and document management."""
+    
+    # Set up logging if requested
+    if log:
+        import logging
+        from pathlib import Path
+        
+        # Configure both console and file logging
+        log_format = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+        
+        # Create output directory if it doesn't exist
+        if output_dir:
+            from datetime import datetime
+            output_path = Path(output_dir)
+            output_path.mkdir(parents=True, exist_ok=True)
+            timestamp = datetime.now().strftime("%H%M%S")
+            log_file = output_path / f"data_store_{timestamp}.log"
+            
+            # Configure logging to both file and console
+            logging.basicConfig(
+                level=logging.INFO,
+                format=log_format,
+                handlers=[
+                    logging.FileHandler(log_file),
+                    logging.StreamHandler()
+                ]
+            )
+            console.print(f"[blue]Verbose logging enabled. Log file: {log_file}[/blue]")
+        else:
+            # Console only
+            logging.basicConfig(level=logging.INFO, format=log_format)
     
     # Load configuration
     if config:
@@ -40,18 +68,17 @@ def main(ctx, config: Optional[Path], schema: Optional[Path], project_id: Option
         console.print("[red]Error: Must provide either --config file or --schema + --project-id[/red]")
         ctx.exit(1)
     
+    # Override output directory if specified
+    if output_dir:
+        app_config.output_directory = output_dir
+    
     ctx.ensure_object(dict)
     ctx.obj['config_manager'] = ConfigManager(app_config)
+    ctx.obj['log'] = log
 
 
-@main.group()
-@click.pass_context
-def dataset(ctx):
-    """Dataset management commands."""
-    pass
-
-
-@dataset.command('create')
+# Dataset commands (from vertex-search dataset)
+@main.command('create-dataset')
 @click.argument('data_file', type=click.Path(exists=True, path_type=Path))
 @click.option('--validate-only', is_flag=True, help='Only validate data without creating dataset')
 @click.pass_context
@@ -96,7 +123,7 @@ def create_dataset(ctx, data_file: Path, validate_only: bool):
         ctx.exit(1)
 
 
-@dataset.command('generate')
+@main.command('generate-dataset')
 @click.option('--count', default=1000, help='Number of records to generate')
 @click.option('--output', type=click.Path(path_type=Path), help='Output file path')
 @click.option('--seed', type=int, help='Random seed for reproducible data')
@@ -127,14 +154,8 @@ def generate_dataset(ctx, count: int, output: Optional[Path], seed: Optional[int
         ctx.exit(1)
 
 
-@main.group()
-@click.pass_context
-def datastore(ctx):
-    """Data store management commands."""
-    pass
-
-
-@datastore.command('create')
+# Datastore commands (from vertex-search datastore)
+@main.command('create')
 @click.argument('data_store_id')
 @click.option('--display-name', help='Display name for the data store')
 @click.option('--solution-type', default='SEARCH', type=click.Choice(['SEARCH', 'RECOMMENDATION']), help='Solution type for the data store')
@@ -158,7 +179,7 @@ def create_datastore(ctx, data_store_id: str, display_name: Optional[str], solut
         ctx.exit(1)
 
 
-@datastore.command('list')
+@main.command('list')
 @click.argument('data_store_id')
 @click.option('--count', default=10, help='Number of documents to list')
 @click.pass_context
@@ -193,7 +214,7 @@ def list_documents(ctx, data_store_id: str, count: int):
         ctx.exit(1)
 
 
-@datastore.command('get-document')
+@main.command('get-document')
 @click.argument('data_store_id')
 @click.argument('document_id')
 @click.option('--json', 'output_json', is_flag=True, help='Output the full document as JSON.')
@@ -222,7 +243,7 @@ def get_document(ctx, data_store_id: str, document_id: str, output_json: bool):
         ctx.exit(1)
 
 
-@datastore.command('upload-gcs')
+@main.command('upload-gcs')
 @click.argument('data_file', type=click.Path(exists=True, path_type=Path))
 @click.argument('bucket_name')
 @click.option('--folder', default="vertex-ai-search", help='Folder path in the bucket')
@@ -252,15 +273,15 @@ def upload_to_gcs(ctx, data_file: Path, bucket_name: str, folder: str, create_bu
         console.print(f"[green]✓ Uploaded {len(uris)} documents to Cloud Storage[/green]")
         console.print(f"[blue]GCS Path: gs://{bucket_name}/{folder}/[/blue]")
         console.print("\nNext steps:")
-        console.print(f"1. Import from GCS: vertex-search --config my_config.json datastore import-gcs {bucket_name} gs://{bucket_name}/{folder}/*")
-        console.print(f"2. Check documents: vertex-search --config my_config.json datastore list {bucket_name}")
+        console.print(f"1. Import from GCS: data-store --config my_config.json import-gcs {bucket_name} gs://{bucket_name}/{folder}/*")
+        console.print(f"2. Check documents: data-store --config my_config.json list {bucket_name}")
         
     except Exception as e:
         console.print(f"[red]Error: {str(e)}[/red]")
         ctx.exit(1)
 
 
-@datastore.command('import-gcs')
+@main.command('import-gcs')
 @click.argument('data_store_id') 
 @click.argument('gcs_uri')
 @click.option('--data-schema', default='document', help='Data schema: document, content, or custom')
@@ -314,7 +335,7 @@ def import_from_gcs(ctx, data_store_id: str, gcs_uri: str, data_schema: str, wai
         ctx.exit(1)
 
 
-@datastore.command('import-bq')
+@main.command('import-bq')
 @click.argument('data_store_id')
 @click.option('--wait', is_flag=True, help='Wait for import to complete')
 @click.option('--skip-schema-update', is_flag=True, help='Skip automatic field settings application from config')
@@ -369,7 +390,7 @@ def import_from_bq(ctx, data_store_id: str, wait: bool, skip_schema_update: bool
         ctx.exit(1)
 
 
-@datastore.command('import')  
+@main.command('import')  
 @click.argument('data_store_id')
 @click.argument('data_file', type=click.Path(exists=True, path_type=Path))
 @click.option('--wait', is_flag=True, help='Wait for import to complete')
@@ -386,8 +407,8 @@ def import_documents(ctx, data_store_id: str, data_file: Path, wait: bool, skip_
         response = input().strip().lower()
         if response not in ['y', 'yes']:
             console.print("Import cancelled. Use the Cloud Storage workflow instead:")
-            console.print(f"1. vertex-search --config my_config.json datastore upload-gcs {data_file} your-bucket-name")
-            console.print(f"2. vertex-search --config my_config.json datastore import-gcs {data_store_id} gs://your-bucket-name/vertex-ai-search/*")
+            console.print(f"1. data-store --config my_config.json upload-gcs {data_file} your-bucket-name")
+            console.print(f"2. data-store --config my_config.json import-gcs {data_store_id} gs://your-bucket-name/vertex-ai-search/*")
             ctx.exit(0)
     except (EOFError, KeyboardInterrupt):
         ctx.exit(0)
@@ -429,7 +450,7 @@ def import_documents(ctx, data_store_id: str, data_file: Path, wait: bool, skip_
                         break
                 time.sleep(10)
         else:
-            console.print("Use 'vertex-search datastore status <operation_id>' to check progress")
+            console.print("Use 'data-store status <operation_id>' to check progress")
             if not skip_schema_update:
                 console.print("[blue]ℹ Use --wait flag to automatically apply field settings after import completion[/blue]")
             
@@ -438,17 +459,18 @@ def import_documents(ctx, data_store_id: str, data_file: Path, wait: bool, skip_
         ctx.exit(1)
 
 
-@datastore.command('update-schema')
+@main.command('update-schema')
 @click.argument('data_store_id')
 @click.pass_context
 def update_schema_fields(ctx, data_store_id: str):
     """Apply field settings from config to data store schema."""
     config_manager: ConfigManager = ctx.obj['config_manager']
+    verbose = ctx.obj.get('log', False)
     asset_manager = MediaAssetManager(config_manager)
     
     try:
         console.print("Applying field settings from config to schema...")
-        success = asset_manager.apply_field_settings_from_config(data_store_id)
+        success = asset_manager.apply_field_settings_from_config(data_store_id, verbose)
         
         if success:
             console.print(f"[green]✓ Field settings applied to data store '{data_store_id}'[/green]")
@@ -462,260 +484,8 @@ def update_schema_fields(ctx, data_store_id: str):
         ctx.exit(1)
 
 
-@main.group()
-@click.pass_context
-def search(ctx):
-    """Search management commands."""
-    pass
-
-
-@search.command('create-engine')
-@click.argument('engine_id')
-@click.argument('data_store_ids', nargs=-1, required=True)
-@click.option('--display-name', help='Display name for the engine')
-@click.option('--solution-type', default='SEARCH', type=click.Choice(['SEARCH', 'RECOMMENDATION']), help='Solution type for the engine')
-@click.pass_context
-def create_search_engine(ctx, engine_id: str, data_store_ids: tuple, display_name: Optional[str], solution_type: str):
-    """Create a search engine connected to data stores."""
-    config_manager: ConfigManager = ctx.obj['config_manager']
-    search_manager = SearchManager(config_manager)
-    
-    display_name = display_name or engine_id
-    
-    try:
-        success = search_manager.create_search_engine(engine_id, display_name, list(data_store_ids), solution_type)
-        if success:
-            console.print(f"[green]✓ {solution_type.title()} engine '{engine_id}' created successfully[/green]")
-        else:
-            console.print(f"[red]✗ Failed to create {solution_type.lower()} engine '{engine_id}'[/red]")
-            ctx.exit(1)
-    except Exception as e:
-        console.print(f"[red]Error: {str(e)}[/red]")
-        ctx.exit(1)
-
-
-@search.command('query')
-@click.argument('query')
-@click.option('--engine-id', help='Search engine ID')
-@click.option('--filters', help='Search filters as JSON string')
-@click.option('--facets', help='Facets to include (comma-separated)')
-@click.option('--page-size', default=10, help='Number of results per page')
-@click.option('--json', 'output_json', is_flag=True, help='Output results as JSON')
-@click.pass_context
-def search_query(ctx, query: str, engine_id: Optional[str], filters: Optional[str], 
-                 facets: Optional[str], page_size: int, output_json: bool):
-    """Perform a search query."""
-    config_manager: ConfigManager = ctx.obj['config_manager']
-    search_manager = SearchManager(config_manager)
-    
-    engine_id = engine_id or config_manager.config.vertex_ai.engine_id
-    if not engine_id:
-        console.print("[red]Error: Engine ID is required[/red]")
-        ctx.exit(1)
-    
-    try:
-        # Parse filters and facets
-        filter_dict = json.loads(filters) if filters else None
-        facet_list = facets.split(',') if facets else None
-        
-        results = search_manager.search(
-            query=query,
-            engine_id=engine_id,
-            filters=filter_dict,
-            facets=facet_list,
-            page_size=page_size
-        )
-        
-        if output_json:
-            # Using print instead of console.print to avoid rich formatting
-            print(json.dumps(results, indent=2))
-            return
-
-        # Display results
-        if 'results' in results and results['results']:
-            table = Table(title=f"Search Results for: {query}")
-            table.add_column("ID", style="cyan")
-            table.add_column("Title", style="green")
-            table.add_column("Score", style="yellow")
-            
-            id_field = config_manager.schema.id_field
-            title_field = config_manager.schema.title_field
-
-            for result in results['results']:
-                doc = result.get('document', {})
-                struct_data = doc.get('structData', {})
-                score = result.get('score', 'N/A')
-                
-                # Correctly get the ID and Title from structData
-                doc_id = struct_data.get(id_field, doc.get('id', 'N/A'))
-                title = struct_data.get(title_field, 'N/A')
-                
-                table.add_row(str(doc_id), str(title), str(score))
-            
-            console.print(table)
-            
-            if 'facets' in results and results['facets']:
-                console.print("\n[bold]Facets:[/bold]")
-                for facet in results['facets']:
-                    console.print(f"  {facet}")
-        else:
-            console.print("No results found")
-            
-    except Exception as e:
-        console.print(f"[red]Error: {str(e)}[/red]")
-        ctx.exit(1)
-
-
-
-@main.group()
-@click.pass_context
-def autocomplete(ctx):
-    """Autocomplete commands."""
-    pass
-
-
-@autocomplete.command('suggest')
-@click.argument('query')
-@click.option('--engine-id', help='Search engine ID')
-@click.pass_context
-def get_suggestions(ctx, query: str, engine_id: Optional[str]):
-    """Get autocomplete suggestions."""
-    config_manager: ConfigManager = ctx.obj['config_manager']
-    autocomplete_manager = AutocompleteManager(config_manager)
-    
-    engine_id = engine_id or config_manager.config.vertex_ai.engine_id
-    if not engine_id:
-        console.print("[red]Error: Engine ID is required[/red]")
-        ctx.exit(1)
-    
-    try:
-        suggestions = autocomplete_manager.get_suggestions(query, engine_id)
-        
-        if suggestions:
-            console.print(f"[bold]Suggestions for '{query}':[/bold]")
-            for suggestion in suggestions:
-                console.print(f"  • {suggestion}")
-        else:
-            console.print("No suggestions found")
-            
-    except Exception as e:
-        console.print(f"[red]Error: {str(e)}[/red]")
-        ctx.exit(1)
-
-
-@main.group()
-@click.pass_context
-def recommend(ctx):
-    """Recommendation commands."""
-    pass
-
-
-@recommend.command('get')
-@click.option('--user-id', required=True, help='User pseudo ID')
-@click.option('--event-type', default='view', help='Event type (view, purchase, etc.)')
-@click.option('--document-ids', help='Document IDs (comma-separated)')
-@click.option('--engine-id', help='Search engine ID')
-@click.option('--max-results', default=10, help='Maximum number of recommendations')
-@click.option('--json', 'output_json', is_flag=True, help='Output results as JSON')
-@click.pass_context
-def get_recommendations(ctx, user_id: str, event_type: str, document_ids: Optional[str], 
-                       engine_id: Optional[str], max_results: int, output_json: bool):
-    """Get recommendations for a user."""
-    config_manager: ConfigManager = ctx.obj['config_manager']
-    recommendation_manager = RecommendationManager(config_manager)
-    
-    engine_id = engine_id or config_manager.config.vertex_ai.engine_id
-    if not engine_id:
-        console.print("[red]Error: Engine ID is required[/red]")
-        ctx.exit(1)
-    
-    try:
-        user_event = {
-            'eventType': event_type,
-            'userPseudoId': user_id,
-            'documents': document_ids.split(',') if document_ids else []
-        }
-        
-        recommendations = recommendation_manager.get_recommendations(
-            user_event, engine_id, max_results
-        )
-        
-        if recommendations:
-            if output_json:
-                # Using print instead of console.print to avoid rich formatting
-                print(json.dumps(recommendations, indent=2))
-            else:
-                table = Table(title=f"Recommendations for user {user_id}")
-                table.add_column("Document ID", style="cyan")
-                table.add_column("Title", style="green")
-                table.add_column("Score", style="yellow")
-                
-                for rec in recommendations:
-                    doc = rec.get('document', {})
-                    score = rec.get('score', 'N/A')
-                    doc_id = doc.get('id', 'N/A')
-                    # The title might be in a 'structData' sub-dictionary
-                    struct_data = doc.get('structData', {})
-                    title = struct_data.get('title', doc.get('title', 'N/A'))
-                    table.add_row(str(doc_id), str(title), str(score))
-                
-                console.print(table)
-        else:
-            console.print("No recommendations found")
-            
-    except Exception as e:
-        console.print(f"[red]Error: {str(e)}[/red]")
-        ctx.exit(1)
-
-
-@recommend.command('record')
-@click.option('--user-id', required=True, help='User pseudo ID')
-@click.option('--event-type', required=True, help='Event type (media-play, media-complete, view-item, search, view-home-page)')
-@click.option('--document-id', required=True, help='Document ID')
-@click.option('--data-store-id', help='Data store ID (for recommendation data store)')
-@click.option('--media-progress-duration', type=float, help='Media progress duration in seconds (for media-complete events)')
-@click.option('--media-progress-percentage', type=float, help='Media progress percentage (0.0-1.0 or 0-100, for media-complete events)')
-@click.pass_context
-def record_event(ctx, user_id: str, event_type: str, document_id: str, data_store_id: Optional[str], 
-                 media_progress_duration: Optional[float], media_progress_percentage: Optional[float]):
-    """Record a user event for recommendation training."""
-    config_manager: ConfigManager = ctx.obj['config_manager']
-    recommendation_manager = RecommendationManager(config_manager)
-    
-    # Use configured data_store_id if not provided
-    data_store_id = data_store_id or getattr(config_manager.config.vertex_ai, 'recommendation_data_store_id', config_manager.config.vertex_ai.data_store_id)
-    
-    try:
-        success = recommendation_manager.record_user_event(
-            event_type=event_type,
-            user_pseudo_id=user_id,
-            documents=[document_id],
-            data_store_id=data_store_id,
-            media_progress_duration=media_progress_duration,
-            media_progress_percentage=media_progress_percentage
-        )
-        
-        if success:
-            console.print(f"[green]✓ User event recorded: {event_type} for user {user_id} on document {document_id}[/green]")
-        else:
-            console.print(f"[red]✗ Failed to record user event[/red]")
-            ctx.exit(1)
-            
-    except Exception as e:
-        console.print(f"[red]Error: {str(e)}[/red]")
-        ctx.exit(1)
-
-
-if __name__ == '__main__':
-    main()
-
-@main.group()
-@click.pass_context
-def bq(ctx):
-    """BigQuery data ingestion commands."""
-    pass
-
-@bq.command('load')
+# BigQuery commands (from vertex-search bq)
+@main.command('bq-load')
 @click.argument('dataset_and_table')
 @click.argument('file_path', type=click.Path(exists=True, path_type=Path))
 @click.option('--replace', is_flag=True, help='Overwrite the table if it already exists.')
@@ -744,7 +514,8 @@ def bq_load(ctx, dataset_and_table: str, file_path: Path, replace: bool):
         console.print(f"[red]An unexpected error occurred: {str(e)}[/red]")
         ctx.exit(1)
 
-@bq.command('schema')
+
+@main.command('bq-schema')
 @click.argument('dataset_and_table')
 @click.pass_context
 def bq_schema(ctx, dataset_and_table: str):
@@ -815,7 +586,8 @@ def bq_schema(ctx, dataset_and_table: str):
         console.print(f"[red]An unexpected error occurred: {str(e)}[/red]")
         ctx.exit(1)
 
-@bq.command('fix-schema')
+
+@main.command('bq-fix-schema')
 @click.argument('dataset_and_table')
 @click.pass_context
 def bq_fix_schema(ctx, dataset_and_table: str):
@@ -844,9 +616,13 @@ def bq_fix_schema(ctx, dataset_and_table: str):
             console.print(f"[red]✗ Failed to fix table schema[/red]")
             console.print("[yellow]BigQuery doesn't allow changing field mode from NULLABLE to REQUIRED.[/yellow]")
             console.print("[blue]Solution: Reload the table to create it with the correct schema:[/blue]")
-            console.print(f"[blue]  vertex-search --config my_config.json bq load {dataset_and_table} <data_file> --replace[/blue]")
+            console.print(f"[blue]  data-store --config my_config.json bq-load {dataset_and_table} <data_file> --replace[/blue]")
             ctx.exit(1)
             
     except Exception as e:
         console.print(f"[red]An unexpected error occurred: {str(e)}[/red]")
         ctx.exit(1)
+
+
+if __name__ == '__main__':
+    main()

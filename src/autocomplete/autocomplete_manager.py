@@ -3,10 +3,10 @@
 from typing import Dict, Any, List, Optional
 from google.cloud import discoveryengine_v1beta
 
-from ..config import ConfigManager
-from ..interfaces import AutocompleteManagerInterface
-from ..utils import setup_logging
-from ..auth import get_credentials, setup_client_options
+from ..shared.config import ConfigManager
+from ..shared.interfaces import AutocompleteManagerInterface
+from ..shared.utils import setup_logging
+from ..shared.auth import get_credentials, setup_client_options
 
 logger = setup_logging()
 

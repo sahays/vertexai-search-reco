@@ -1,0 +1,1 @@
+"""Shared utilities and interfaces for all domain modules."""

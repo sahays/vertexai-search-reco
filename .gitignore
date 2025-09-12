@@ -7,7 +7,7 @@ customer_*
 customer_config.json
 customer_schema.json
 
-output_*.json
+*output*
 
 .claude
 

@@ -1,8 +1,8 @@
 """Manages Vertex AI Data Store operations."""
 
 from google.cloud import discoveryengine_v1beta
-from ...utils import handle_vertex_ai_error, DataStoreError, setup_logging
-from ...config import ConfigManager
+from ..shared.utils import handle_vertex_ai_error, DataStoreError, setup_logging
+from ..shared.config import ConfigManager
 
 logger = setup_logging()
 

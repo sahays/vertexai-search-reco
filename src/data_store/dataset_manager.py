@@ -5,9 +5,9 @@ from pathlib import Path
 from typing import Dict, Any, List
 import jsonschema
 
-from ..config import ConfigManager
-from ..interfaces import DatasetManagerInterface
-from ..utils import setup_logging
+from ..shared.config import ConfigManager
+from ..shared.interfaces import DatasetManagerInterface
+from ..shared.utils import setup_logging
 
 logger = setup_logging()
 

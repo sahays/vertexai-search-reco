@@ -1,8 +1,8 @@
 """Facade for managing media assets in Vertex AI Search."""
 
 from typing import Dict, Any, List
-from ...config import ConfigManager, BigQueryConfig
-from ...interfaces import MediaAssetManagerInterface
+from ..shared.config import ConfigManager, BigQueryConfig
+from ..shared.interfaces import MediaAssetManagerInterface
 from .client_manager import ClientManager
 from .datastore_manager import DataStoreManager
 from .document_manager import DocumentManager
@@ -54,8 +54,8 @@ class MediaAssetManager(MediaAssetManagerInterface):
     def get_schema(self, data_store_id: str) -> Dict[str, Any]:
         return self._schema_manager.get_schema(data_store_id)
 
-    def apply_field_settings_from_config(self, data_store_id: str) -> bool:
-        return self._schema_manager.apply_field_settings_from_config(data_store_id)
+    def apply_field_settings_from_config(self, data_store_id: str, verbose: bool = False) -> bool:
+        return self._schema_manager.apply_field_settings_from_config(data_store_id, verbose)
 
     def delete_data_store(self, data_store_id: str) -> bool:
         return self._datastore_manager.delete_data_store(data_store_id)

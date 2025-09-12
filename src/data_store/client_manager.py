@@ -1,8 +1,8 @@
 """Manages initialization of Google Cloud clients."""
 
 from google.cloud import discoveryengine_v1beta, storage
-from ...auth import get_credentials, setup_client_options
-from ...config import ConfigManager
+from ..shared.auth import get_credentials, setup_client_options
+from ..shared.config import ConfigManager
 
 class ClientManager:
     """Handles the creation and configuration of Google Cloud clients."""

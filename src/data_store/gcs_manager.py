@@ -3,8 +3,8 @@
 import json
 import uuid
 from typing import Dict, Any, List
-from ...utils import DataStoreError, setup_logging
-from ...config import ConfigManager
+from ..shared.utils import DataStoreError, setup_logging
+from ..shared.config import ConfigManager
 
 logger = setup_logging()
 

@@ -3,8 +3,8 @@
 import json
 from typing import Dict, Any, List
 from google.cloud import discoveryengine_v1beta
-from ...utils import handle_vertex_ai_error, DataStoreError, setup_logging
-from ...config import ConfigManager, BigQueryConfig
+from ..shared.utils import handle_vertex_ai_error, DataStoreError, setup_logging
+from ..shared.config import ConfigManager, BigQueryConfig
 
 logger = setup_logging()
 

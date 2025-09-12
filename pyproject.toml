@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=61.0", "wheel"]
+requires = ["setuptools>=64.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -22,9 +22,12 @@ dependencies = [
 ]
 
 [project.scripts]
-vertex-search = "vertex_search.cli:main"
-data-prep = "data_prep.cli:main"
+data-store = "src.data_store.cli:main"
+search = "src.search.cli:main"
+autocomplete = "src.autocomplete.cli:main"
+recommendation = "src.recommendation.cli:main"
+data-prep = "src.data_prep.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["vertex_search*", "data_prep*"]
+include = ["src*"]
