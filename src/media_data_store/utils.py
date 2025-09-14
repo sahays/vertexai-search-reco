@@ -13,7 +13,7 @@ class MediaDataStoreError(Exception):
     pass
 
 
-def setup_logging(log_dir: Optional[Path] = None, level: int = logging.INFO, subcommand: Optional[str] = None) -> logging.Logger:
+def setup_logging(log_dir: Optional[Path] = None, level: int = logging.INFO, subcommand: Optional[str] = None, module_name: str = "datastore") -> logging.Logger:
     """Setup logging with optional file output."""
     logger = logging.getLogger("media_data_store")
     logger.setLevel(level)
@@ -43,9 +43,9 @@ def setup_logging(log_dir: Optional[Path] = None, level: int = logging.INFO, sub
         log_dir = Path(log_dir)
         log_dir.mkdir(parents=True, exist_ok=True)
         
-        timestamp = datetime.now().strftime("%H%M%S")
+        timestamp = datetime.now().strftime("%H%M%S%f")[:9]  # HHMMSSF (includes first 3 microsecond digits)
         subcommand_part = f"-{subcommand}" if subcommand else ""
-        log_file = log_dir / f"{timestamp}{subcommand_part}-datastore.log"
+        log_file = log_dir / f"{timestamp}{subcommand_part}-{module_name}.log"
         
         file_handler = logging.FileHandler(log_file, mode='w', encoding='utf-8')
         file_handler.setFormatter(file_formatter)

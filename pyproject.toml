@@ -23,8 +23,11 @@ dependencies = [
 ]
 
 [project.scripts]
-media-data-store = "src.media_data_store.cli:main"
+media-data-store = "media_data_store.cli:main"
+media-engine = "media_engine.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
-where = ["."]
-include = ["src*"]
+where = ["src"]
