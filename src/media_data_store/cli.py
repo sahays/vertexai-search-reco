@@ -100,8 +100,9 @@ def validate_data(ctx, data_file: Optional[Path]):
 @main.command('transform')
 @click.option('--data-file', type=click.Path(exists=True, path_type=Path), help='Data file path (uses config default if not specified)')
 @click.option('--mapping', type=click.Path(exists=True, path_type=Path), help='Mapping file path (uses config default if not specified)')
+@click.option('--include-original', is_flag=True, default=False, help='Include the original customer data in a field named "original_payload".')
 @click.pass_context
-def transform_data(ctx, data_file: Optional[Path], mapping: Optional[Path]):
+def transform_data(ctx, data_file: Optional[Path], mapping: Optional[Path], include_original: bool):
     """Transform customer data to Google media schema format."""
     config_manager: ConfigManager = ctx.obj['config_manager']
     output_dir: Optional[Path] = ctx.obj['output_dir']
@@ -125,10 +126,10 @@ def transform_data(ctx, data_file: Optional[Path], mapping: Optional[Path]):
         # Handle both single record and array of records
         if isinstance(data, list):
             console.print(f"[blue]Mapping {len(data)} records...[/blue]")
-            mapped_data = schema_mapper.map_schema_fields(data, mapping_config, output_dir, 'transform')
+            mapped_data = schema_mapper.map_schema_fields(data, mapping_config, output_dir, 'transform', include_original)
             console.print(f"[green]✓ Successfully mapped {len(mapped_data) if isinstance(mapped_data, list) else 1} records[/green]")
         else:
-            mapped_data = schema_mapper.map_schema_fields(data, mapping_config, output_dir, 'transform')
+            mapped_data = schema_mapper.map_schema_fields(data, mapping_config, output_dir, 'transform', include_original)
             console.print("[green]✓ Schema mapping completed[/green]")
             
     except Exception as e:
@@ -380,6 +381,34 @@ def create_custom_schema(ctx, data_store_id: str, schema_definition: Optional[Pa
         console.print(f"Required fields: {', '.join(result['required_fields'])}")
         if result['optional_fields']:
             console.print(f"Optional fields: {', '.join(result['optional_fields'])}")
+        
+    except Exception as e:
+        console.print(f"[red]Error: {str(e)}[/red]")
+        ctx.exit(1)
+
+
+@main.command('update-schema')
+@click.argument('data_store_id')
+@click.pass_context
+def update_schema(ctx, data_store_id: str):
+    """Update the data store schema based on the configuration file."""
+    config_manager: ConfigManager = ctx.obj['config_manager']
+    output_dir: Optional[Path] = ctx.obj['output_dir']
+    log_dir: Optional[Path] = ctx.obj['log_dir']
+    
+    # Setup subcommand-specific logging
+    logger = setup_logging(log_dir, subcommand='update-schema')
+    logger.info("Media Data Store update-schema command started")
+    
+    try:
+        ds_manager = MediaDataStoreManager(config_manager)
+        
+        console.print(f"[blue]Updating schema for data store: {data_store_id}...[/blue]")
+        
+        result = ds_manager.apply_schema_from_config(data_store_id, output_dir, 'update-schema')
+        
+        console.print(f"[green]✓ Schema update operation started: {result['operation_name']}[/green]")
+        console.print(f"Check the Google Cloud Console for the status of this long-running operation.")
         
     except Exception as e:
         console.print(f"[red]Error: {str(e)}[/red]")

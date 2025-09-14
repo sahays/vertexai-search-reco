@@ -48,7 +48,7 @@ class CustomDataTransformer:
     }
     
     @staticmethod
-    def transform_customer_record(data: Dict[str, Any]) -> Dict[str, Any]:
+    def transform_customer_record(data: Dict[str, Any], include_original: bool = False) -> Dict[str, Any]:
         """Transform a single customer record to Google media schema."""
         logger.debug(f"Transforming customer record ID: {data.get('id')}")
         
@@ -113,6 +113,10 @@ class CustomDataTransformer:
         if data.get("rights"):
             transformed["distribution_rights"] = data["rights"]
         
+        if include_original:
+            transformed["original_payload"] = json.dumps(data)
+            logger.debug("Included original payload in transformed record")
+
         logger.debug(f"Transformed record with {len(transformed)} fields")
         return transformed
     
@@ -306,7 +310,7 @@ class CustomDataTransformer:
         return extracted
     
     @staticmethod
-    def transform_batch(data_list: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def transform_batch(data_list: List[Dict[str, Any]], include_original: bool = False) -> List[Dict[str, Any]]:
         """Transform a batch of customer records."""
         logger.info(f"Transforming batch of {len(data_list)} records")
         
@@ -315,7 +319,7 @@ class CustomDataTransformer:
         
         for i, record in enumerate(data_list):
             try:
-                transformed = CustomDataTransformer.transform_customer_record(record)
+                transformed = CustomDataTransformer.transform_customer_record(record, include_original=include_original)
                 
                 # Validate against Google schema
                 validation_result = GoogleMediaValidator.validate_required_fields(transformed)

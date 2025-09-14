@@ -1,0 +1,44 @@
+{
+	"vertex_ai": {
+		"project_id": "your-project-id",
+		"location": "global"
+	},
+	"schema": {
+		"schema_type": "custom",
+		"field_mappings": {
+			"title_source_field": "movie_title",
+			"uri_source_field": "video_file_url",
+			"categories_source_field": "genre_list",
+			"available_time_source_field": "release_datetime",
+			"duration_source_field": "runtime_formatted",
+			"id_source_field": "content_id",
+			"content_source_field": "plot_summary",
+			"language_source_field": "primary_language",
+			"rating_source_field": "imdb_rating",
+			"persons_source_field": "cast_and_crew",
+			"organizations_source_field": "production_companies"
+		},
+		"searchable_fields": ["movie_title", "plot_summary", "genre_list", "cast_and_crew"],
+		"retrievable_fields": [
+			"content_id",
+			"movie_title",
+			"video_file_url",
+			"genre_list",
+			"release_datetime",
+			"runtime_formatted",
+			"plot_summary",
+			"primary_language",
+			"imdb_rating",
+			"cast_and_crew",
+			"production_companies",
+			"original_payload"
+		],
+		"indexable_fields": ["movie_title", "plot_summary", "genre_list"],
+		"completable_fields": ["movie_title", "cast_and_crew"],
+		"dynamic_facetable_fields": ["genre_list", "primary_language", "imdb_rating"]
+	},
+	"sample_files": {
+		"data_file": "custom_media_sample_data.json",
+		"mapping_file": "customer_sample_data.json"
+	}
+}

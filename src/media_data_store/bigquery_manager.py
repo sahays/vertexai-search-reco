@@ -64,12 +64,13 @@ class MediaBigQueryManager:
         
         # Note: schema_update_options not compatible with WRITE_TRUNCATE on non-partitioned tables
         
-        # Generate schema dynamically from the data structure
+        # Analyze data for type inconsistencies and normalize fields that should be arrays.
+        # This prevents errors when a field is sometimes a list and sometimes a single value.
+        data = self._analyze_and_normalize_data(data)
+
+        # Generate schema dynamically from the now-consistent data structure
         schema = self._generate_schema_from_data(data)
         job_config.schema = schema
-        
-        # Convert data to NDJSON format
-        ndjson_data = "\\n".join(json.dumps(row, default=str) for row in data)
         
         # Start load job
         job = self.client.load_table_from_json(
@@ -174,6 +175,47 @@ class MediaBigQueryManager:
         self.logger.info(f"Retrieved {len(sample_data)} sample rows from {dataset_id}.{table_id}")
         
         return sample_data
+    
+    def _analyze_and_normalize_data(self, data: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Analyzes data to find inconsistent array types and normalizes them.
+        For any field key that ever appears as a list, this ensures it is always a list
+        in every record.
+        """
+        array_field_keys = set()
+
+        # First pass: recursively find all keys that are ever used for lists.
+        def find_array_keys(obj):
+            if isinstance(obj, dict):
+                for key, value in obj.items():
+                    if isinstance(value, list):
+                        array_field_keys.add(key)
+                    find_array_keys(value)
+            elif isinstance(obj, list):
+                for item in obj:
+                    find_array_keys(item)
+
+        for record in data:
+            find_array_keys(record)
+        
+        if array_field_keys:
+            self.logger.debug(f"Identified keys that should always be arrays: {array_field_keys}")
+
+        # Second pass: recursively normalize the data.
+        def normalize_object(obj):
+            if isinstance(obj, dict):
+                for key, value in obj.items():
+                    if key in array_field_keys and not isinstance(value, list):
+                        # This is the fix: wrap non-list values in a list.
+                        obj[key] = [value] if value is not None else []
+                    else:
+                        normalize_object(value)
+            elif isinstance(obj, list):
+                for item in obj:
+                    normalize_object(item)
+            return obj
+
+        return [normalize_object(record) for record in data]
     
     def _generate_schema_from_data(self, data: List[Dict[str, Any]]) -> List[bigquery.SchemaField]:
         """Generate BigQuery schema from data structure, keeping datetime fields as strings."""
@@ -337,8 +379,34 @@ class MediaBigQueryManager:
             elif isinstance(field_value, list):
                 if field_value and isinstance(field_value[0], str):
                     nested_schema.append(bigquery.SchemaField(field_name, "STRING", mode="REPEATED"))
+                elif field_value and isinstance(field_value[0], dict):
+                    # Array of objects - generate nested schema from all examples
+                    sub_nested_examples = []
+                    for nested_obj in nested_examples:
+                        if isinstance(nested_obj, dict) and field_name in nested_obj and nested_obj[field_name]:
+                            sub_nested_examples.extend(nested_obj[field_name])
+                    
+                    if sub_nested_examples:
+                        nested_fields = self._generate_nested_schema_from_examples(sub_nested_examples, datetime_fields)
+                        nested_schema.append(bigquery.SchemaField(field_name, "RECORD", mode="REPEATED", fields=nested_fields))
+                    else:
+                        # Default to string array
+                        nested_schema.append(bigquery.SchemaField(field_name, "STRING", mode="REPEATED"))
                 else:
                     nested_schema.append(bigquery.SchemaField(field_name, "STRING", mode="REPEATED"))
+            elif isinstance(field_value, dict):
+                # Nested object - collect all nested examples for recursion
+                sub_nested_examples = []
+                for nested_obj in nested_examples:
+                    if isinstance(nested_obj, dict) and field_name in nested_obj and nested_obj[field_name]:
+                        sub_nested_examples.append(nested_obj[field_name])
+                
+                if sub_nested_examples:
+                    nested_fields = self._generate_nested_schema_from_examples(sub_nested_examples, datetime_fields)
+                    nested_schema.append(bigquery.SchemaField(field_name, "RECORD", mode=mode, fields=nested_fields))
+                else:
+                    # Default empty record
+                    nested_schema.append(bigquery.SchemaField(field_name, "RECORD", mode=mode, fields=[]))
             else:
                 nested_schema.append(bigquery.SchemaField(field_name, "STRING", mode=mode))
         

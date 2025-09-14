@@ -93,18 +93,19 @@ class MediaSchemaMapper:
         return validation_results
     
     def map_schema_fields(self, data: Dict[str, Any], mapping_config: Dict[str, Any], 
-                         output_dir: Optional[Path] = None, subcommand: str = "transform") -> Dict[str, Any]:
+                         output_dir: Optional[Path] = None, subcommand: str = "transform",
+                         include_original: bool = False) -> Dict[str, Any]:
         """Apply schema field mappings to media data using customer transformer."""
         self.logger.info("Starting customer data transformation and schema mapping")
         
         # Handle both single record and array of records
         if isinstance(data, list):
             self.logger.info(f"Transforming batch of {len(data)} customer records")
-            mapped_data = CustomDataTransformer.transform_batch(data)
+            mapped_data = CustomDataTransformer.transform_batch(data, include_original=include_original)
         else:
             self.logger.info("Transforming single customer record")
             try:
-                mapped_data = CustomDataTransformer.transform_customer_record(data)
+                mapped_data = CustomDataTransformer.transform_customer_record(data, include_original=include_original)
             except Exception as e:
                 self.logger.error(f"Failed to transform customer record: {e}")
                 raise MediaDataStoreError(f"Customer data transformation failed: {e}")

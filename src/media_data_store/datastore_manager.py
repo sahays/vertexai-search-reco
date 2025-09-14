@@ -1,5 +1,6 @@
 """Data store management for Vertex AI Search for Media."""
 
+import json
 from typing import Dict, Any, Optional, List
 from pathlib import Path
 from datetime import datetime
@@ -8,9 +9,10 @@ from google.cloud import discoveryengine_v1beta
 from google.cloud.discoveryengine_v1beta.types import (
     DataStore,
     Schema,
-    Document,
     ImportDocumentsRequest,
-    BigQuerySource
+    BigQuerySource,
+    GetSchemaRequest,
+    UpdateSchemaRequest
 )
 from google.protobuf.json_format import MessageToDict
 
@@ -37,40 +39,19 @@ class MediaDataStoreManager:
     @handle_vertex_ai_error
     def create_data_store(self, data_store_id: str, display_name: str,
                          content_config: str = "NO_CONTENT",
-                         document_processing_config: Optional[Dict[str, Any]] = None,
                          output_dir: Optional[Path] = None, subcommand: str = "create") -> Dict[str, Any]:
-        """Create a media-specific data store following Google's requirements."""
+        """Create a media-specific data store."""
         self.logger.info(f"Creating media data store: {data_store_id}")
-        self.logger.debug(f"Create parameters - ID: {data_store_id}, Name: {display_name}, Config: {content_config}")
-        self.logger.debug(f"Project: {self.config_manager.vertex_ai.project_id}, Location: {self.config_manager.vertex_ai.location}")
-        
         parent = f"projects/{self.config_manager.vertex_ai.project_id}/locations/{self.config_manager.vertex_ai.location}/collections/default_collection"
-        self.logger.debug(f"Parent resource: {parent}")
         
-        # Validate that this is for media industry vertical
-        if not self._validate_media_requirements():
-            raise MediaDataStoreError("Data store creation requirements not met for media industry vertical")
-        
-        # Configure for media search with Google's requirements
-        # For MEDIA industry vertical, use specified content config
         content_config_enum = getattr(discoveryengine_v1beta.DataStore.ContentConfig, content_config)
         
-        data_store_config = {
-            "display_name": display_name,
-            "industry_vertical": discoveryengine_v1beta.IndustryVertical.MEDIA,
-            "solution_types": [discoveryengine_v1beta.SolutionType.SOLUTION_TYPE_SEARCH],
-            "content_config": content_config_enum
-        }
-        
-        self.logger.debug(f"Using {content_config} config for MEDIA industry vertical")
-        
-        # Add document processing config if provided
-        if document_processing_config:
-            self.logger.debug(f"Adding document processing config: {document_processing_config}")
-            # This would be used for advanced media processing features
-        
-        data_store = discoveryengine_v1beta.DataStore(**data_store_config)
-        self.logger.debug(f"Created data store object with industry vertical: MEDIA")
+        data_store = discoveryengine_v1beta.DataStore(
+            display_name=display_name,
+            industry_vertical=discoveryengine_v1beta.IndustryVertical.MEDIA,
+            solution_types=[discoveryengine_v1beta.SolutionType.SOLUTION_TYPE_SEARCH],
+            content_config=content_config_enum
+        )
         
         operation = self.data_store_client.create_data_store(
             parent=parent,
@@ -78,11 +59,7 @@ class MediaDataStoreManager:
             data_store_id=data_store_id
         )
         
-        # Get operation details safely
-        operation_name = getattr(operation, 'name', None) or str(operation.operation.name if hasattr(operation, 'operation') else 'unknown')
-        self.logger.info(f"Data store creation initiated. Operation: {operation_name}")
-        
-        # Wait for operation completion
+        self.logger.info(f"Data store creation initiated. Operation: {operation.operation.name}")
         result = operation.result(timeout=300)
         
         creation_result = {
@@ -92,7 +69,7 @@ class MediaDataStoreManager:
             "industry_vertical": "MEDIA",
             "content_config": content_config,
             "creation_time": datetime.now().isoformat(),
-            "operation_name": operation_name
+            "operation_name": operation.operation.name
         }
         
         self.logger.info(f"Media data store created successfully: {result.name}")
@@ -109,10 +86,13 @@ class MediaDataStoreManager:
         """Import data from BigQuery into the media data store."""
         self.logger.info(f"Starting BigQuery import for data store: {data_store_id}")
         
-        parent = f"projects/{self.config_manager.vertex_ai.project_id}/locations/{self.config_manager.vertex_ai.location}/collections/default_collection/dataStores/{data_store_id}/branches/default_branch"
+        parent = self.schema_client.branch_path(
+            project=self.config_manager.vertex_ai.project_id,
+            location=self.config_manager.vertex_ai.location,
+            data_store=data_store_id,
+            branch="default_branch"
+        )
         
-        # Configure BigQuery source
-        # Use "custom" data schema since we have custom field mappings
         bigquery_source = discoveryengine_v1beta.BigQuerySource(
             project_id=self.config_manager.vertex_ai.project_id,
             dataset_id=dataset_id,
@@ -120,27 +100,23 @@ class MediaDataStoreManager:
             data_schema="custom"
         )
         
-        import_config = discoveryengine_v1beta.ImportDocumentsRequest(
+        request = discoveryengine_v1beta.ImportDocumentsRequest(
             parent=parent,
             bigquery_source=bigquery_source,
             reconciliation_mode=discoveryengine_v1beta.ImportDocumentsRequest.ReconciliationMode.INCREMENTAL
         )
         
-        operation = self.document_client.import_documents(import_config)
-        
-        # Get operation details safely
-        operation_name = getattr(operation, 'name', None) or str(operation.operation.name if hasattr(operation, 'operation') else 'unknown')
+        operation = self.document_client.import_documents(request=request)
         
         import_result = {
             "data_store_id": data_store_id,
             "source_table": f"{dataset_id}.{table_id}",
-            "operation_name": operation_name,
+            "operation_name": operation.operation.name,
             "import_started": datetime.now().isoformat(),
             "status": "IN_PROGRESS"
         }
         
-        self.logger.info(f"BigQuery import initiated. Operation: {operation_name}")
-        self.logger.info("Use 'status' command to check import progress")
+        self.logger.info(f"BigQuery import initiated. Operation: {operation.operation.name}")
         
         if output_dir:
             output_file = save_output(import_result, output_dir, f"import_{data_store_id}_started.json", subcommand)
@@ -153,14 +129,7 @@ class MediaDataStoreManager:
         """Get the status of an import operation."""
         self.logger.info(f"Checking status for operation: {operation_name}")
         
-        # Create a GetOperationRequest using the google.longrunning operations
-        from google.longrunning import operations_pb2
-        request = operations_pb2.GetOperationRequest(name=operation_name)
-        
-        # Use the document client's get_operation method
-        operation = self.document_client.get_operation(request=request)
-        
-        # Convert operation to dict for easier handling
+        operation = self.document_client.get_operation(name=operation_name)
         operation_dict = MessageToDict(operation)
         
         status_info = {
@@ -171,14 +140,7 @@ class MediaDataStoreManager:
         }
         
         if operation.done:
-            # Check if there's actually an error (not just an empty error object)
-            has_error = hasattr(operation, 'error') and operation.error and (
-                hasattr(operation.error, 'code') or 
-                (hasattr(operation.error, 'message') and operation.error.message) or
-                (isinstance(operation_dict.get("error"), dict) and operation_dict["error"])
-            )
-            
-            if has_error:
+            if operation.error:
                 status_info["error"] = operation_dict.get("error", {})
                 status_info["status"] = "FAILED"
                 self.logger.error(f"Import operation failed: {operation.error}")
@@ -187,7 +149,6 @@ class MediaDataStoreManager:
                 status_info["status"] = "COMPLETED"
                 self.logger.info("Import operation completed successfully")
         else:
-            # Check metadata for progress
             if "metadata" in operation_dict:
                 status_info["metadata"] = operation_dict["metadata"]
             self.logger.info("Import operation still in progress")
@@ -201,199 +162,122 @@ class MediaDataStoreManager:
     @handle_vertex_ai_error
     def get_data_store_info(self, data_store_id: str) -> Dict[str, Any]:
         """Get information about a data store."""
-        name = f"projects/{self.config_manager.vertex_ai.project_id}/locations/{self.config_manager.vertex_ai.location}/collections/default_collection/dataStores/{data_store_id}"
-        
+        name = self.data_store_client.data_store_path(
+            project=self.config_manager.vertex_ai.project_id,
+            location=self.config_manager.vertex_ai.location,
+            data_store=data_store_id
+        )
         data_store = self.data_store_client.get_data_store(name=name)
         
-        return {
-            "name": data_store.name,
-            "display_name": data_store.display_name,
-            "industry_vertical": str(data_store.industry_vertical),
-            "content_config": str(data_store.content_config),
-            "create_time": data_store.create_time.isoformat() if data_store.create_time else None,
-        }
+        return MessageToDict(data_store)
     
     @handle_vertex_ai_error
     def list_data_stores(self) -> List[Dict[str, Any]]:
         """List all data stores in the project."""
-        parent = f"projects/{self.config_manager.vertex_ai.project_id}/locations/{self.config_manager.vertex_ai.location}/collections/default_collection"
+        parent = self.data_store_client.collection_path(
+            project=self.config_manager.vertex_ai.project_id,
+            location=self.config_manager.vertex_ai.location,
+            collection="default_collection"
+        )
         
-        data_stores = []
-        for data_store in self.data_store_client.list_data_stores(parent=parent):
-            data_stores.append({
-                "name": data_store.name,
-                "display_name": data_store.display_name,
-                "industry_vertical": str(data_store.industry_vertical),
-                "content_config": str(data_store.content_config),
-            })
-        
-        return data_stores
-    
-    def _validate_media_requirements(self) -> bool:
-        """Validate requirements for media data store creation."""
-        self.logger.debug("Validating media data store requirements")
-        
-        # Check that location is supported for media
-        supported_locations = ["global", "us-central1", "europe-west1"]
-        if self.config_manager.vertex_ai.location not in supported_locations:
-            self.logger.warning(f"Location '{self.config_manager.vertex_ai.location}' may not support media data stores")
-            return False
-        
-        # Additional validations can be added here
-        # - Check if project has required APIs enabled
-        # - Validate quota limits
-        # - Check permissions
-        
-        self.logger.debug("Media data store requirements validation passed")
-        return True
+        return [MessageToDict(ds) for ds in self.data_store_client.list_data_stores(parent=parent)]
     
     @handle_vertex_ai_error
-    def create_custom_schema(self, data_store_id: str, schema_definition: Dict[str, Any], 
-                           output_dir: Optional[Path] = None) -> Dict[str, Any]:
-        """Create a custom schema for the media data store."""
-        self.logger.info(f"Creating custom schema for data store: {data_store_id}")
-        self.logger.debug(f"Schema definition: {schema_definition}")
-        
-        parent = f"projects/{self.config_manager.vertex_ai.project_id}/locations/{self.config_manager.vertex_ai.location}/collections/default_collection/dataStores/{data_store_id}"
-        
-        # Build schema using discoveryengine Schema class
-        schema_fields = []
-        
-        # Add required Google fields with custom source mapping
-        field_mappings = self.config_manager.schema.field_mappings
-        
-        # Title field (required)
-        title_field = Schema.FieldConfig(
-            field_path=field_mappings.title_source_field,
-            field_type=Schema.FieldConfig.FieldType.STRING,
-            indexable_option=Schema.FieldConfig.IndexableOption.INDEXABLE_ENABLED,
-            dynamic_facetable_option=Schema.FieldConfig.DynamicFacetableOption.DYNAMIC_FACETABLE_DISABLED,
-            searchable_option=Schema.FieldConfig.SearchableOption.SEARCHABLE_ENABLED,
-            retrievable_option=Schema.FieldConfig.RetrievableOption.RETRIEVABLE_ENABLED,
-            completable_option=Schema.FieldConfig.CompletableOption.COMPLETABLE_ENABLED
-        )
-        schema_fields.append(title_field)
-        
-        # URI field (required) 
-        uri_field = Schema.FieldConfig(
-            field_path=field_mappings.uri_source_field,
-            field_type=Schema.FieldConfig.FieldType.STRING,
-            indexable_option=Schema.FieldConfig.IndexableOption.INDEXABLE_DISABLED,
-            searchable_option=Schema.FieldConfig.SearchableOption.SEARCHABLE_DISABLED,
-            retrievable_option=Schema.FieldConfig.RetrievableOption.RETRIEVABLE_ENABLED,
-            completable_option=Schema.FieldConfig.CompletableOption.COMPLETABLE_DISABLED
-        )
-        schema_fields.append(uri_field)
-        
-        # Categories field (required)
-        categories_field = Schema.FieldConfig(
-            field_path=field_mappings.categories_source_field,
-            field_type=Schema.FieldConfig.FieldType.STRING,
-            indexable_option=Schema.FieldConfig.IndexableOption.INDEXABLE_ENABLED,
-            dynamic_facetable_option=Schema.FieldConfig.DynamicFacetableOption.DYNAMIC_FACETABLE_ENABLED,
-            searchable_option=Schema.FieldConfig.SearchableOption.SEARCHABLE_ENABLED,
-            retrievable_option=Schema.FieldConfig.RetrievableOption.RETRIEVABLE_ENABLED,
-            completable_option=Schema.FieldConfig.CompletableOption.COMPLETABLE_DISABLED
-        )
-        schema_fields.append(categories_field)
-        
-        # Available time field (required)
-        available_time_field = Schema.FieldConfig(
-            field_path=field_mappings.available_time_source_field,
-            field_type=Schema.FieldConfig.FieldType.DATETIME,
-            indexable_option=Schema.FieldConfig.IndexableOption.INDEXABLE_ENABLED,
-            searchable_option=Schema.FieldConfig.SearchableOption.SEARCHABLE_DISABLED,
-            retrievable_option=Schema.FieldConfig.RetrievableOption.RETRIEVABLE_ENABLED,
-            completable_option=Schema.FieldConfig.CompletableOption.COMPLETABLE_DISABLED
-        )
-        schema_fields.append(available_time_field)
-        
-        # Duration field (required)
-        duration_field = Schema.FieldConfig(
-            field_path=field_mappings.duration_source_field,
-            field_type=Schema.FieldConfig.FieldType.STRING,
-            indexable_option=Schema.FieldConfig.IndexableOption.INDEXABLE_DISABLED,
-            searchable_option=Schema.FieldConfig.SearchableOption.SEARCHABLE_DISABLED,
-            retrievable_option=Schema.FieldConfig.RetrievableOption.RETRIEVABLE_ENABLED,
-            completable_option=Schema.FieldConfig.CompletableOption.COMPLETABLE_DISABLED
-        )
-        schema_fields.append(duration_field)
-        
-        # Add optional fields if configured
-        if field_mappings.content_source_field:
-            content_field = Schema.FieldConfig(
-                field_path=field_mappings.content_source_field,
-                field_type=Schema.FieldConfig.FieldType.STRING,
-                indexable_option=Schema.FieldConfig.IndexableOption.INDEXABLE_ENABLED,
-                searchable_option=Schema.FieldConfig.SearchableOption.SEARCHABLE_ENABLED,
-                retrievable_option=Schema.FieldConfig.RetrievableOption.RETRIEVABLE_ENABLED,
-                completable_option=Schema.FieldConfig.CompletableOption.COMPLETABLE_DISABLED
-            )
-            schema_fields.append(content_field)
-        
-        if field_mappings.language_source_field:
-            language_field = Schema.FieldConfig(
-                field_path=field_mappings.language_source_field,
-                field_type=Schema.FieldConfig.FieldType.STRING,
-                indexable_option=Schema.FieldConfig.IndexableOption.INDEXABLE_DISABLED,
-                dynamic_facetable_option=Schema.FieldConfig.DynamicFacetableOption.DYNAMIC_FACETABLE_ENABLED,
-                searchable_option=Schema.FieldConfig.SearchableOption.SEARCHABLE_DISABLED,
-                retrievable_option=Schema.FieldConfig.RetrievableOption.RETRIEVABLE_ENABLED
-            )
-            schema_fields.append(language_field)
-        
-        if field_mappings.persons_source_field:
-            persons_field = Schema.FieldConfig(
-                field_path=field_mappings.persons_source_field,
-                field_type=Schema.FieldConfig.FieldType.OBJECT,
-                indexable_option=Schema.FieldConfig.IndexableOption.INDEXABLE_ENABLED,
-                searchable_option=Schema.FieldConfig.SearchableOption.SEARCHABLE_ENABLED,
-                retrievable_option=Schema.FieldConfig.RetrievableOption.RETRIEVABLE_ENABLED,
-                completable_option=Schema.FieldConfig.CompletableOption.COMPLETABLE_ENABLED
-            )
-            schema_fields.append(persons_field)
-        
-        # Create the schema
-        schema = Schema(
-            struct_schema={"properties": schema_definition},
-            field_configs=schema_fields
+    def apply_schema_from_config(self, data_store_id: str, output_dir: Optional[Path] = None, subcommand: str = "update-schema") -> Dict[str, Any]:
+        """Update the data store schema based on the application configuration."""
+        self.logger.info(f"Applying schema from config to data store: {data_store_id}")
+        self.logger.warning("This operation merges settings from the config file with the existing schema.")
+        schema_config = self.config_manager.schema
+
+        # 1. Get the current schema from the data store
+        schema_name = self.schema_client.schema_path(
+            project=self.config_manager.vertex_ai.project_id,
+            location=self.config_manager.vertex_ai.location,
+            data_store=data_store_id,
+            schema="default_schema"
         )
         
-        operation = self.schema_client.create_schema(
-            parent=parent,
-            schema=schema,
-            schema_id="custom_media_schema"
-        )
+        try:
+            self.logger.info(f"Fetching existing schema from: {schema_name}")
+            request = GetSchemaRequest(name=schema_name)
+            raw_schema_response = self.schema_client.get_schema(request=request)
+            self.logger.info("Successfully fetched raw schema response.")
+        except Exception as e:
+            self.logger.error(f"Failed to fetch schema for data store '{data_store_id}'. Error: {e}")
+            raise MediaDataStoreError(f"Could not retrieve schema for '{data_store_id}'.") from e
+
+        # 2. Safely parse the schema response
+        try:
+            schema_json_string = raw_schema_response.json_schema
+            schema_dict = json.loads(schema_json_string)
+            self.logger.info("Successfully parsed schema from json_schema attribute.")
+            self.logger.info(f"Fetched Schema: {json.dumps(schema_dict, indent=2)}")
+        except Exception as e:
+            self.logger.error(f"Failed to parse schema from response: {e}")
+            raise MediaDataStoreError("Could not parse schema from response.") from e
+
+        current_schema_properties = schema_dict.get("properties", {})
         
-        self.logger.info("Custom schema creation initiated")
-        result = operation.result(timeout=300)
-        
-        schema_result = {
-            "schema_name": result.name,
-            "field_count": len(schema_fields),
-            "required_fields": [
-                field_mappings.title_source_field,
-                field_mappings.uri_source_field,
-                field_mappings.categories_source_field,
-                field_mappings.available_time_source_field,
-                field_mappings.duration_source_field
-            ],
-            "optional_fields": [
-                field for field in [
-                    field_mappings.content_source_field,
-                    field_mappings.language_source_field, 
-                    field_mappings.persons_source_field,
-                    field_mappings.organizations_source_field
-                ] if field
-            ],
-            "creation_time": datetime.now().isoformat(),
-            "operation_name": operation.name
+        if not current_schema_properties:
+            self.logger.error("The fetched schema for this data store is empty. Please import data first.")
+            raise MediaDataStoreError("Cannot update an empty schema.")
+
+        self.logger.info(f"Found {len(current_schema_properties)} fields in the current schema.")
+
+        # 3. Create a deep copy to modify
+        import copy
+        updated_schema_properties = copy.deepcopy(current_schema_properties)
+
+        # 4. Apply settings from config to the copied schema
+        all_config_fields = {
+            'retrievable': set(schema_config.retrievable_fields),
+            'searchable': set(schema_config.searchable_fields),
+            'indexable': set(schema_config.indexable_fields),
+            'completable': set(schema_config.completable_fields),
+            'dynamicFacetable': set(schema_config.dynamic_facetable_fields)
+        }
+
+        for field_name_from_server, field_spec in updated_schema_properties.items():
+            # Skip complex types (arrays/objects) as their annotations are not set at the root.
+            if field_spec.get("type") in ["array", "object"]:
+                self.logger.debug(f"Skipping complex type field: {field_name_from_server}")
+                continue
+
+            field_name_in_config = field_name_from_server.replace('_', '.')
+            
+            for setting, fields_in_config in all_config_fields.items():
+                if setting in field_spec: # Only update existing annotations
+                    field_spec[setting] = field_name_in_config in fields_in_config
+
+        # 5. Construct the final Schema object for the update request
+        final_struct_schema = {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": updated_schema_properties
         }
         
-        self.logger.info(f"Custom schema created: {result.name}")
+        schema_to_update = Schema(
+            name=schema_name,
+            struct_schema=final_struct_schema
+        )
         
+        self.logger.info(f"Constructed updated schema with {len(updated_schema_properties)} fields.")
+        self.logger.info(f"Request Schema: {json.dumps(final_struct_schema, indent=2)}")
+        
+        # 6. Call the update_schema API
+        request = UpdateSchemaRequest(schema=schema_to_update)
+        operation = self.schema_client.update_schema(request=request)
+        self.logger.info(f"Schema update operation started. Operation: {operation.operation.name}")
+
+        update_result = {
+            "data_store_id": data_store_id,
+            "operation_name": operation.operation.name,
+            "fields_configured": len(updated_schema_properties),
+            "update_started_time": datetime.now().isoformat()
+        }
+
         if output_dir:
-            output_file = save_output(schema_result, output_dir, f"custom_schema_{data_store_id}.json")
-            self.logger.info(f"Schema details saved to: {output_file}")
-        
-        return schema_result
+            output_file = save_output(update_result, output_dir, f"update_schema_{data_store_id}_started.json", subcommand)
+            self.logger.info(f"Schema update details saved to: {output_file}")
+
+        return update_result
