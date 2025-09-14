@@ -1,0 +1,88 @@
+{
+  "schema_mapping": {
+    "source_to_google": {
+      "movie_title": "title",
+      "video_file_url": "uri", 
+      "genre_list": "categories",
+      "release_datetime": "available_time",
+      "runtime_formatted": "duration",
+      "plot_summary": "content",
+      "primary_language": "language",
+      "imdb_rating": "rating",
+      "cast_and_crew": "persons",
+      "production_companies": "organizations"
+    }
+  },
+  "value_transformations": {
+    "genre_list": {
+      "type": "array_to_google_categories",
+      "description": "Convert genre array to Google's supported media categories"
+    },
+    "runtime_formatted": {
+      "type": "validate_google_duration_format", 
+      "description": "Ensure duration is in Google's required format (e.g. '1h30m')"
+    },
+    "release_datetime": {
+      "type": "validate_rfc3339_datetime",
+      "description": "Ensure datetime is valid RFC 3339 format"
+    },
+    "video_file_url": {
+      "type": "validate_uri_limits",
+      "description": "Ensure URI is valid and under 5000 characters"
+    },
+    "movie_title": {
+      "type": "validate_title_limits", 
+      "description": "Ensure title is under 1000 characters"
+    },
+    "cast_and_crew": {
+      "type": "transform_to_person_objects",
+      "description": "Convert cast array to Google's person object format with name and role"
+    },
+    "production_companies": {
+      "type": "transform_to_organization_objects",
+      "description": "Convert company array to Google's organization object format"
+    }
+  },
+  "validation_rules": {
+    "custom_schema_compliance": true,
+    "google_field_mapping": true,
+    "strict_type_checking": true,
+    "enforce_required_mappings": [
+      "movie_title",
+      "video_file_url", 
+      "genre_list",
+      "release_datetime",
+      "runtime_formatted"
+    ]
+  },
+  "field_behavior_config": {
+    "searchable": {
+      "movie_title": {
+        "boost": 2.0,
+        "exact_match_boost": 1.5
+      },
+      "plot_summary": {
+        "boost": 1.0
+      },
+      "genre_list": {
+        "boost": 1.2
+      }
+    },
+    "facetable": {
+      "genre_list": {
+        "max_values": 10
+      },
+      "primary_language": {
+        "max_values": 20
+      },
+      "imdb_rating": {
+        "type": "numerical_range"
+      }
+    },
+    "completable": {
+      "movie_title": {
+        "min_query_length": 2
+      }
+    }
+  }
+}

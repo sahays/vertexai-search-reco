@@ -1,0 +1,40 @@
+{
+  "field_mappings": {
+    "video_id": "id",
+    "video_url": "media_uri",
+    "content_type": "media_type"
+  },
+  "value_transformations": {
+    "genre": {
+      "type": "to_array",
+      "separator": ","
+    },
+    "actors": {
+      "type": "to_array", 
+      "separator": ","
+    },
+    "directors": {
+      "type": "to_array",
+      "separator": ","
+    },
+    "tags": {
+      "type": "to_array",
+      "separator": ","
+    },
+    "content_type": {
+      "type": "normalize_media_type"
+    },
+    "duration": {
+      "type": "to_string"
+    },
+    "rating": {
+      "type": "to_string"
+    }
+  },
+  "validation_rules": {
+    "required_fields": ["video_id", "title", "video_url"],
+    "media_types": ["MOVIE", "DOCUMENTARY", "SPECIAL", "EDUCATIONAL", "SERIES"],
+    "max_title_length": 200,
+    "max_description_length": 2000
+  }
+}

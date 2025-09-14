@@ -1,0 +1,58 @@
+{
+  "vertex_ai": {
+    "project_id": "your-project-id",
+    "location": "global"
+  },
+  "schema": {
+    "id_field": "video_id",
+    "title_field": "title",
+    "content_field": "description",
+    "media_uri_field": "video_url",
+    "media_type_field": "content_type",
+    "searchable_fields": [
+      "title",
+      "description", 
+      "genre",
+      "actors",
+      "directors",
+      "tags"
+    ],
+    "retrievable_fields": [
+      "video_id",
+      "title",
+      "description",
+      "video_url",
+      "thumbnail_url",
+      "duration",
+      "release_date",
+      "genre",
+      "content_type",
+      "language",
+      "actors",
+      "directors",
+      "rating"
+    ],
+    "indexable_fields": [
+      "title",
+      "description",
+      "genre",
+      "actors",
+      "directors"
+    ],
+    "completable_fields": [
+      "title",
+      "actors",
+      "directors"
+    ],
+    "dynamic_facetable_fields": [
+      "genre",
+      "content_type",
+      "language",
+      "rating"
+    ]
+  },
+  "sample_files": {
+    "data_file": "sample_media_data.json",
+    "mapping_file": "media_field_mapping.json"
+  }
+}

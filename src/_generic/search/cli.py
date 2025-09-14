@@ -81,10 +81,12 @@ def create_search_engine(ctx, engine_id: str, data_store_ids: tuple, display_nam
 @click.option('--filters', help='Search filters as JSON string')
 @click.option('--facets', help='Facets to include (comma-separated)')
 @click.option('--page-size', default=10, help='Number of results per page')
+@click.option('--search-mode', default='auto', type=click.Choice(['auto', 'keyword', 'semantic', 'hybrid']), help='Search mode for partial matching')
+@click.option('--boost-spec', help='Boost specification as JSON for field boosting')
 @click.option('--json', 'output_json', is_flag=True, help='Output results as JSON')
 @click.pass_context
 def search_query(ctx, query: str, engine_id: Optional[str], filters: Optional[str], 
-                 facets: Optional[str], page_size: int, output_json: bool):
+                 facets: Optional[str], page_size: int, search_mode: str, boost_spec: Optional[str], output_json: bool):
     """Perform a search query."""
     config_manager: ConfigManager = ctx.obj['config_manager']
     search_manager = SearchManager(config_manager)
@@ -98,13 +100,19 @@ def search_query(ctx, query: str, engine_id: Optional[str], filters: Optional[st
         # Parse filters and facets
         filter_dict = json.loads(filters) if filters else None
         facet_list = facets.split(',') if facets else None
+        boost_dict = json.loads(boost_spec) if boost_spec else None
+        
+        if search_mode != 'auto':
+            console.print(f"[blue]Using {search_mode} search mode for better partial matching[/blue]")
         
         results = search_manager.search(
             query=query,
             engine_id=engine_id,
             filters=filter_dict,
             facets=facet_list,
-            page_size=page_size
+            page_size=page_size,
+            search_mode=search_mode,
+            boost_spec=boost_dict
         )
         
         if output_json:

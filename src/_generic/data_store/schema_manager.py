@@ -187,7 +187,15 @@ class SchemaManager:
                         if i >= 4:  # Show max 5 fields
                             break
                     logger.info("Full downloaded schema:")
-                    logger.info(json.dumps(properties, indent=2))
+                    try:
+                        # Convert MapComposite to dict for JSON serialization
+                        if hasattr(properties, 'items'):
+                            serializable_props = dict(properties.items())
+                        else:
+                            serializable_props = properties
+                        logger.info(json.dumps(serializable_props, indent=2))
+                    except Exception as e:
+                        logger.info(f"Schema content (non-serializable): {list(properties.keys()) if hasattr(properties, 'keys') else 'No keys'}")
                 else:
                     logger.warning("No properties found in parsed schema")
             
@@ -259,11 +267,28 @@ class SchemaManager:
                 logger.error("The schema for this data store is currently empty. Please import data first.")
                 if verbose:
                     logger.error("Debug: Schema dict content:")
-                    logger.error(json.dumps(schema_dict, indent=2))
+                    try:
+                        logger.error(json.dumps(schema_dict, indent=2))
+                    except Exception as e:
+                        logger.error(f"Schema dict is not JSON serializable: {e}")
                 return False
 
-            # Create a deep copy for modification.
-            new_properties = json.loads(json.dumps(original_properties))
+            # Convert MapComposite objects to regular dicts immediately
+            def convert_mapcomposite(obj):
+                """Recursively convert MapComposite objects to regular dicts."""
+                if hasattr(obj, 'items') and hasattr(obj, 'keys'):
+                    # This is a MapComposite-like object
+                    return {k: convert_mapcomposite(v) for k, v in obj.items()}
+                elif isinstance(obj, list):
+                    return [convert_mapcomposite(item) for item in obj]
+                else:
+                    return obj
+            
+            original_properties = convert_mapcomposite(original_properties)
+
+            # Create a deep copy for modification (original_properties already converted)
+            import copy
+            new_properties = copy.deepcopy(original_properties)
 
             # 2. Define a helper to apply settings to a single schema field spec.
             def _apply_annotations_to_spec(spec, full_field_name):
@@ -377,8 +402,10 @@ class SchemaManager:
             request = discoveryengine_v1beta.UpdateSchemaRequest(schema=schema)
             
             operation = self.schema_client.update_schema(request=request)
-            logger.info(f"Schema update started: {operation.operation.name}")
+            operation_id = operation.operation.name
+            logger.info(f"Schema update started: {operation_id}")
             logger.info(f"Applied field settings to {len(changes_made)} fields: {changes_made}")
+            logger.info(f"Use 'data-store status {operation_id}' to check re-indexing progress")
             
             return True
             

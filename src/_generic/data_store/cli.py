@@ -475,12 +475,94 @@ def update_schema_fields(ctx, data_store_id: str):
         if success:
             console.print(f"[green]✓ Field settings applied to data store '{data_store_id}'[/green]")
             console.print("[blue]Note: Schema re-indexing will occur automatically. This may take time for large datasets.[/blue]")
+            console.print(f"[blue]Use 'data-store status <operation_id>' to check re-indexing progress.[/blue]")
         else:
             console.print(f"[red]✗ Failed to apply field settings to data store '{data_store_id}'[/red]")
             ctx.exit(1)
             
     except Exception as e:
         console.print(f"[red]Error: {str(e)}[/red]")
+        ctx.exit(1)
+
+
+@main.command('status')
+@click.argument('operation_id')
+@click.pass_context
+def check_operation_status(ctx, operation_id: str):
+    """Check the status of a long-running operation (like re-indexing)."""
+    config_manager: ConfigManager = ctx.obj['config_manager']
+    verbose = ctx.obj.get('log', False)
+    
+    try:
+        from google.cloud import discoveryengine_v1beta
+        from google.api_core import operation
+        
+        client = discoveryengine_v1beta.SchemaServiceClient()
+        
+        # Format operation ID if it's just a number
+        if operation_id.isdigit() or not operation_id.startswith('projects/'):
+            # Assume it's a short operation ID, need to construct full name
+            console.print(f"[yellow]Warning: Short operation ID provided. You may need the full operation name.[/yellow]")
+            console.print(f"[blue]Try using the full operation name from the schema update log.[/blue]")
+        
+        # Get operation status directly
+        operations_client = client.transport.operations_client
+        op_response = operations_client.get_operation(name=operation_id)
+        
+        console.print(f"Checking operation status: {operation_id}")
+        
+        if op_response.done:
+            console.print("[green]✓ Operation completed successfully[/green]")
+            if verbose:
+                console.print(f"Result: {op_response.response}")
+            if hasattr(op_response, 'error') and op_response.error:
+                console.print(f"[red]Error: {op_response.error}[/red]")
+        else:
+            console.print("[yellow]⏳ Operation still in progress...[/yellow]")
+            if hasattr(op_response, 'metadata') and op_response.metadata:
+                console.print(f"Metadata: {op_response.metadata}")
+                
+        # Show progress if available
+        if verbose:
+            console.print(f"Operation name: {op_response.name}")
+            if hasattr(op_response, 'metadata'):
+                console.print(f"Metadata: {op_response.metadata}")
+        
+    except Exception as e:
+        console.print(f"[red]Error checking operation status: {str(e)}[/red]")
+        if verbose:
+            import traceback
+            console.print(f"[red]{traceback.format_exc()}[/red]")
+        ctx.exit(1)
+
+
+@main.command('enable-semantic-search')
+@click.argument('data_store_id')
+@click.option('--alpha', default=0.5, help='RRF alpha parameter (0.0-1.0, default 0.5)')
+@click.pass_context
+def enable_semantic_search(ctx, data_store_id: str, alpha: float):
+    """Enable semantic/hybrid search on a data store for better partial matching."""
+    config_manager: ConfigManager = ctx.obj['config_manager']
+    verbose = ctx.obj.get('log', False)
+    
+    try:
+        console.print(f"Enabling semantic search on data store: {data_store_id}")
+        console.print(f"RRF Alpha parameter: {alpha} (0.0=keyword focus, 1.0=semantic focus)")
+        
+        # This would typically involve updating the data store configuration
+        # The exact implementation depends on the Vertex AI Search API
+        console.print("[yellow]⚠ Semantic search configuration requires:")
+        console.print("  1. Configure data store to use both dense and sparse embeddings")
+        console.print("  2. Re-index data with semantic embeddings")
+        console.print("  3. Update search queries to use hybrid search")
+        console.print("[blue]Please configure semantic search in the GCP Console:")
+        console.print(f"https://console.cloud.google.com/ai/search-and-recommendations/data/{data_store_id}")
+        
+    except Exception as e:
+        console.print(f"[red]Error enabling semantic search: {str(e)}[/red]")
+        if verbose:
+            import traceback
+            console.print(f"[red]{traceback.format_exc()}[/red]")
         ctx.exit(1)
 
 

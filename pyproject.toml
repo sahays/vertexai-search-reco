@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "vertexai-search-media"
 version = "0.1.0"
-description = "Vertex AI Search for Media - Schema-agnostic search and recommendation CLI"
+description = "Vertex AI Search for Media - Specialized media search and recommendation CLI"
 authors = [{name = "Drama Shorts Startup"}]
 license = {text = "MIT"}
 readme = "README.md"
@@ -18,15 +18,12 @@ dependencies = [
     "jsonschema>=4.19.0",
     "python-dotenv>=1.0.0",
     "rich>=13.0.0",
-    "google-cloud-bigquery>=3.0.0"
+    "google-cloud-bigquery>=3.0.0",
+    "python-dateutil>=2.8.0"
 ]
 
 [project.scripts]
-data-store = "src.data_store.cli:main"
-search = "src.search.cli:main"
-autocomplete = "src.autocomplete.cli:main"
-recommendation = "src.recommendation.cli:main"
-data-prep = "src.data_prep.cli:main"
+media-data-store = "src.media_data_store.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["."]

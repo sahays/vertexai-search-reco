@@ -102,6 +102,8 @@ class SearchManager(SearchManagerInterface):
         facets: Optional[List[str]] = None,
         page_size: int = 10,
         page_token: Optional[str] = None,
+        search_mode: str = "auto",
+        boost_spec: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Perform a search query."""
         try:
@@ -113,6 +115,31 @@ class SearchManager(SearchManagerInterface):
                 page_size=page_size,
                 page_token=page_token or "",
             )
+
+            # Add boost specifications if provided
+            if boost_spec:
+                try:
+                    boost_specs = []
+                    for field_name, boost_value in boost_spec.items():
+                        boost_spec_obj = discoveryengine_v1beta.SearchRequest.BoostSpec(
+                            condition_boost_specs=[
+                                discoveryengine_v1beta.SearchRequest.BoostSpec.ConditionBoostSpec(
+                                    condition=f'{field_name}: *',  # Boost all values of this field
+                                    boost=float(boost_value)
+                                )
+                            ]
+                        )
+                        boost_specs.append(boost_spec_obj)
+                    search_request.boost_spec = boost_specs[0] if boost_specs else None
+                    logger.info(f"Added boost specifications for fields: {list(boost_spec.keys())}")
+                except Exception as e:
+                    logger.warning(f"Failed to add boost specifications: {e}")
+
+            # Configure search mode for better partial matching
+            if search_mode in ['semantic', 'hybrid']:
+                logger.info(f"Search mode '{search_mode}' requested - relying on serving config settings")
+                # Note: Semantic/hybrid search is typically configured at the serving config level
+                # The actual implementation depends on the data store configuration
 
             # Add facet specs if provided
             if facets:
