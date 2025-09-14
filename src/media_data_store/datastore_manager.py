@@ -201,6 +201,7 @@ class MediaDataStoreManager:
             self.logger.info(f"Fetching existing schema from: {schema_name}")
             request = GetSchemaRequest(name=schema_name)
             raw_schema_response = self.schema_client.get_schema(request=request)
+            self.logger.info(raw_schema_response)
             self.logger.info("Successfully fetched raw schema response.")
         except Exception as e:
             self.logger.error(f"Failed to fetch schema for data store '{data_store_id}'. Error: {e}")
@@ -208,10 +209,14 @@ class MediaDataStoreManager:
 
         # 2. Safely parse the schema response
         try:
-            schema_json_string = raw_schema_response.json_schema
-            schema_dict = json.loads(schema_json_string)
-            self.logger.info("Successfully parsed schema from json_schema attribute.")
-            self.logger.info(f"Fetched Schema: {json.dumps(schema_dict, indent=2)}")
+            schema_json_string = raw_schema_response
+            if schema_json_string:
+                schema_dict = schema_json_string
+                self.logger.info("Successfully parsed schema from json_schema attribute.")
+                self.logger.info(f"Fetched Schema: {schema_dict}")
+            else:
+                self.logger.warning("Schema response from server is empty. Starting with an empty schema.")
+                schema_dict = {}
         except Exception as e:
             self.logger.error(f"Failed to parse schema from response: {e}")
             raise MediaDataStoreError("Could not parse schema from response.") from e
@@ -219,8 +224,7 @@ class MediaDataStoreManager:
         current_schema_properties = schema_dict.get("properties", {})
         
         if not current_schema_properties:
-            self.logger.error("The fetched schema for this data store is empty. Please import data first.")
-            raise MediaDataStoreError("Cannot update an empty schema.")
+            self.logger.warning("The fetched schema for this data store is empty. Please import data first.")
 
         self.logger.info(f"Found {len(current_schema_properties)} fields in the current schema.")
 
@@ -238,16 +242,23 @@ class MediaDataStoreManager:
         }
 
         for field_name_from_server, field_spec in updated_schema_properties.items():
-            # Skip complex types (arrays/objects) as their annotations are not set at the root.
-            if field_spec.get("type") in ["array", "object"]:
-                self.logger.debug(f"Skipping complex type field: {field_name_from_server}")
-                continue
-
             field_name_in_config = field_name_from_server.replace('_', '.')
             
-            for setting, fields_in_config in all_config_fields.items():
-                if setting in field_spec: # Only update existing annotations
-                    field_spec[setting] = field_name_in_config in fields_in_config
+            target_spec = field_spec
+            if field_spec.get("type") == "array" and "items" in field_spec:
+                target_spec = field_spec["items"]
+
+            is_key_property = "keyPropertyMapping" in field_spec
+
+            if is_key_property:
+                # For key properties, only update existing annotations
+                for setting, fields_in_config in all_config_fields.items():
+                    if setting in target_spec:
+                        target_spec[setting] = field_name_in_config in fields_in_config
+            else:
+                # For normal fields, add or update all annotations
+                for setting, fields_in_config in all_config_fields.items():
+                    target_spec[setting] = field_name_in_config in fields_in_config
 
         # 5. Construct the final Schema object for the update request
         final_struct_schema = {
