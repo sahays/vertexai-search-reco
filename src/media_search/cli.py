@@ -30,35 +30,68 @@ def main(ctx, config: Path, log_dir: Optional[Path], output_dir: Optional[Path])
     ctx.obj['log_dir'] = log_dir
     ctx.obj['output_dir'] = Path(output_dir) if output_dir else None
 
-@main.command()
+@main.command("search")
+@click.argument('engine_id')
 @click.argument('query_text')
-@click.option('--engine-id', required=True, help='The ID of the search engine.')
-@click.option('--filter', help='Filter expression JSON string (e.g., \'{\"genre\": \"drama\"}\'')
-@click.option('--facets', help='Comma-separated list of fields for faceting.')
+@click.option('--filter', 'filters', multiple=True, help='Filter expression (e.g., "categories:Drama"). Can be repeated.')
+@click.option('--facet-field', 'facet_fields', multiple=True, help='Field to request facets for. Can be repeated.')
 @click.option('--page-size', type=int, default=10, help='Number of results per page.')
+@click.option('--offset', type=int, default=0, help='Starting offset for results.')
+@click.option('--json', 'json_output', is_flag=True, help='Output the full JSON response to a file in --output-dir.')
 @click.pass_context
-def query(ctx, query_text: str, engine_id: str, filter: Optional[str], facets: Optional[str], page_size: int):
+def search(ctx, engine_id: str, query_text: str, filters: list[str], facet_fields: list[str], page_size: int, offset: int, json_output: bool):
     """Execute a search query."""
     config_manager: ConfigManager = ctx.obj['config_manager']
     output_dir: Optional[Path] = ctx.obj['output_dir']
     log_dir: Optional[Path] = ctx.obj['log_dir']
     
+    if json_output and not output_dir:
+        console.print("[red]Error: --output-dir is required when using the --json flag.[/red]")
+        ctx.exit(1)
+        
     logger = setup_logging(log_dir, subcommand='search')
     logger.info("Media Search query command started")
 
     try:
         manager = SearchManager(config_manager)
         
-        # Parse facets if provided
-        facet_list = facets.split(',') if facets else []
+        # Process filters into the required API format
+        processed_filters = []
+        operators = ['>=', '<=', '>', '<', '=']
+        for f in filters:
+            found_op = None
+            for op in operators:
+                if op in f:
+                    found_op = op
+                    break
+            
+            # Handle range/comparison filters (e.g., for dates or numbers)
+            if found_op:
+                parts = f.split(found_op, 1)
+                key = parts[0].strip()
+                value = parts[1].strip()
+                # Values in comparisons must be quoted if they are not numbers.
+                # It's safest to quote them to handle date-times correctly.
+                processed_filters.append(f'{key} {found_op} "{value}"')
+            # Handle simple key:value filters for array fields, which need the ANY() syntax.
+            elif ":" in f:
+                key, value = f.split(":", 1)
+                processed_filters.append(f'{key}:ANY("{value}")')
+            else:
+                # Pass through any other filter format that the user provides manually
+                processed_filters.append(f)
+        
+        filter_expression = " AND ".join(processed_filters) if processed_filters else None
         
         # Run the async search function
         results = asyncio.run(manager.search(
             query=query_text,
             engine_id=engine_id,
-            filter_expression=filter,
-            facet_fields=facet_list,
+            filter_expression=filter_expression,
+            facet_fields=list(facet_fields),
             page_size=page_size,
+            offset=offset,
+            json_output=json_output,
             output_dir=output_dir
         ))
         
@@ -67,11 +100,12 @@ def query(ctx, query_text: str, engine_id: str, filter: Optional[str], facets: O
         
         for i, item in enumerate(results.get('results', [])):
             console.print(f"\n[bold cyan]Result {i+1}:[/bold cyan]")
+            struct_data = item.get('document', {}).get('structData', {})
             console.print(f"  [bold]ID:[/bold] {item.get('id')}")
-            if item.get('document', {}).get('title'):
-                console.print(f"  [bold]Title:[/bold] {item['document']['title']}")
-            if item.get('document', {}).get('plot_summary'):
-                console.print(f"  [bold]Summary:[/bold] {item['document']['plot_summary'][:200]}...")
+            if struct_data.get('title'):
+                console.print(f"  [bold]Title:[/bold] {struct_data.get('title')}")
+            if struct_data.get('desc'):
+                console.print(f"  [bold]Description:[/bold] {struct_data.get('desc')[:200]}...")
         
         if results.get('facets'):
             console.print("\n[bold yellow]Facets:[/bold yellow]")
@@ -83,6 +117,8 @@ def query(ctx, query_text: str, engine_id: str, filter: Optional[str], facets: O
     except Exception as e:
         console.print(f"[red]Error: {e}[/red]")
         ctx.exit(1)
+
+
 
 
 @main.command()

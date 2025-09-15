@@ -54,8 +54,7 @@ class MediaEngineManager:
         engine = Engine(
             display_name=display_name,
             data_store_ids=[datastore_id],
-            solution_type=SolutionType.SOLUTION_TYPE_SEARCH,
-            industry_vertical=IndustryVertical.MEDIA
+            solution_type=SolutionType.SOLUTION_TYPE_SEARCH
         )
         
         # Create engine (this returns a long-running operation)
@@ -155,15 +154,13 @@ class MediaEngineManager:
             if datastore_id and datastore_id not in engine.data_store_ids:
                 continue
             
-            # Only include MEDIA engines
-            if engine.industry_vertical != Engine.IndustryVertical.MEDIA:
-                continue
+            # The industry vertical is not a direct property of the Engine object in the API.
+            # Filtering should be done based on the associated data stores if necessary.
             
             engine_info = {
                 "engine_id": engine.name.split("/")[-1],
                 "engine_name": engine.name,
                 "display_name": engine.display_name,
-                "description": engine.description,
                 "datastore_ids": list(engine.data_store_ids),
                 "solution_type": str(engine.solution_type),
                 "industry_vertical": str(engine.industry_vertical),

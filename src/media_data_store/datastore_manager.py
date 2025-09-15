@@ -234,40 +234,41 @@ class MediaDataStoreManager:
         import copy
         updated_schema_properties = copy.deepcopy(current_schema_properties)
 
-        # 4. Apply settings from config to the copied schema
-        all_config_fields = {
+                # 4. Apply settings from config to the copied schema
+        all_config_fields_map = {
             'retrievable': set(schema_config.retrievable_fields),
             'searchable': set(schema_config.searchable_fields),
             'indexable': set(schema_config.indexable_fields),
             'completable': set(schema_config.completable_fields),
             'dynamicFacetable': set(schema_config.dynamic_facetable_fields)
         }
+        # Create a single set of all field names mentioned in the config for easy lookup
+        all_config_field_names = set().union(*all_config_fields_map.values())
 
         for field_name_from_server, field_spec in updated_schema_properties.items():
-            field_name_in_config = field_name_from_server.replace('_', '.')
+            
+            # Determine the correct field name to use for config lookup.
+            # Handles cases like 'original_payload' -> 'original.payload'
+            potential_dotted_name = field_name_from_server.replace('_', '.')
+            field_name_in_config = (
+                potential_dotted_name
+                if potential_dotted_name in all_config_field_names
+                else field_name_from_server
+            )
             
             target_spec = field_spec
-            # Check for nested spec in array types
+            # For array types, the settings apply to the 'items' sub-spec
             if field_spec.get("type") == "array" and "items" in field_spec:
                 target_spec = field_spec["items"]
 
-            is_key_property = "keyPropertyMapping" in target_spec
-            is_structural_type = target_spec.get("type") in ["object", "array"]
-
-            # Rule 1: If it's a structural key property (like 'image' or 'persons'), skip all annotations.
-            if is_key_property and is_structural_type:
-                self.logger.info(f"Field '{field_name_from_server}' is a structural key property. Skipping all annotations.")
-                continue
-
-            # Apply all settings from config first
-            for setting, fields_in_config in all_config_fields.items():
-                target_spec[setting] = field_name_in_config in fields_in_config
-
-            # Rule 2: If it's a simple key property (like 'hash_tags'), remove forbidden annotations.
-            if is_key_property:
-                self.logger.info(f"Field '{field_name_from_server}' is a key property. Removing 'searchable' and 'indexable' annotations.")
-                target_spec.pop("searchable", None)
-                target_spec.pop("indexable", None)
+            # Apply all settings from the configuration to the target spec
+            for setting, fields_in_config in all_config_fields_map.items():
+                is_in_config = field_name_in_config in fields_in_config
+                
+                # Only set the value if it's explicitly true in the config.
+                # Do not set to false, as that might override server defaults.
+                if is_in_config:
+                    target_spec[setting] = True
 
         # 5. Construct the final Schema object for the update request
         final_struct_schema = {

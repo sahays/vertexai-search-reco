@@ -25,6 +25,7 @@ dependencies = [
 [project.scripts]
 media-data-store = "media_data_store.cli:main"
 media-engine = "media_engine.cli:main"
+media-search = "media_search.cli:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}

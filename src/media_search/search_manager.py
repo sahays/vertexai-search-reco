@@ -27,23 +27,24 @@ class SearchManager:
 
     @handle_vertex_ai_error
     async def search(self, query: str, engine_id: str, filter_expression: Optional[str] = None,
-                     facet_fields: List[str] = [], page_size: int = 10,
-                     output_dir: Optional[Path] = None) -> Dict[str, Any]:
+                     facet_fields: List[str] = [], page_size: int = 10, offset: int = 0,
+                     json_output: bool = False, output_dir: Optional[Path] = None) -> Dict[str, Any]:
         """Performs a search request."""
-        self.logger.info(f"Performing search for query: '{query}' on engine: {engine_id}")
+        self.logger.info(f"Performing search for query: '{query}' on data store: {engine_id}")
 
         serving_config = self.search_client.serving_config_path(
             project=self.config_manager.vertex_ai.project_id,
             location=self.config_manager.vertex_ai.location,
-            data_store=engine_id, # In VAIS for Media, Engine ID is used as Data Store ID for serving
-            serving_config="default_config",
+            data_store=engine_id,
+            serving_config="default_serving_config",
         )
 
         # Build facet specs
         facet_specs = []
         for field in facet_fields:
             facet_specs.append(discoveryengine_v1beta.SearchRequest.FacetSpec(
-                facet_key=discoveryengine_v1beta.SearchRequest.FacetSpec.FacetKey(key=field)
+                facet_key=discoveryengine_v1beta.SearchRequest.FacetSpec.FacetKey(key=field),
+                limit=100
             ))
 
         request = discoveryengine_v1beta.SearchRequest(
@@ -51,6 +52,7 @@ class SearchManager:
             query=query,
             filter=filter_expression,
             page_size=page_size,
+            offset=offset,
             facet_specs=facet_specs,
             content_search_spec=discoveryengine_v1beta.SearchRequest.ContentSearchSpec(
                 snippet_spec=discoveryengine_v1beta.SearchRequest.ContentSearchSpec.SnippetSpec(
@@ -66,11 +68,8 @@ class SearchManager:
         response = self.search_client.search(request)
         
         # Process results
-        results = []
-        for result in response.results:
-            results.append(MessageToDict(result))
-            
-        facets = [MessageToDict(f) for f in response.facets]
+        results = [MessageToDict(r._pb) for r in response.results]
+        facets = [MessageToDict(f._pb) for f in response.facets]
 
         search_response = {
             "query": query,
@@ -80,9 +79,18 @@ class SearchManager:
             "search_time": datetime.now().isoformat()
         }
 
-        if output_dir:
+        if json_output and output_dir:
+            # Parse original_payload from string to JSON object
+            for result in search_response.get('results', []):
+                try:
+                    doc_struct = result.get('document', {}).get('structData', {})
+                    if 'original_payload' in doc_struct and isinstance(doc_struct['original_payload'], str):
+                        doc_struct['original_payload'] = json.loads(doc_struct['original_payload'])
+                except (json.JSONDecodeError, KeyError) as e:
+                    self.logger.warning(f"Could not parse original_payload for document ID {result.get('id')}: {e}")
+
             output_file = save_output(search_response, output_dir, f"search_results_{datetime.now().strftime('%H%M%S')}.json", "search")
-            self.logger.info(f"Search results saved to: {output_file}")
+            self.logger.info(f"Full JSON response saved to: {output_file}")
 
         return search_response
 
