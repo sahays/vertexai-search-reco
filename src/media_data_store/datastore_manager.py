@@ -201,7 +201,7 @@ class MediaDataStoreManager:
             self.logger.info(f"Fetching existing schema from: {schema_name}")
             request = GetSchemaRequest(name=schema_name)
             raw_schema_response = self.schema_client.get_schema(request=request)
-            self.logger.info(raw_schema_response)
+            # self.logger.info(raw_schema_response)
             self.logger.info("Successfully fetched raw schema response.")
         except Exception as e:
             self.logger.error(f"Failed to fetch schema for data store '{data_store_id}'. Error: {e}")
@@ -209,11 +209,13 @@ class MediaDataStoreManager:
 
         # 2. Safely parse the schema response
         try:
-            schema_json_string = raw_schema_response
-            if schema_json_string:
-                schema_dict = schema_json_string
-                self.logger.info("Successfully parsed schema from json_schema attribute.")
-                self.logger.info(f"Fetched Schema: {schema_dict}")
+            if raw_schema_response:
+                # Convert the entire Protobuf response to a dictionary.
+                # This handles nested structures correctly and makes it JSON serializable.
+                response_dict = MessageToDict(raw_schema_response._pb)
+                schema_dict = response_dict.get("structSchema", {})
+                self.logger.info("Successfully parsed schema from response.")
+                self.logger.info(f"Fetched Schema: {json.dumps(schema_dict, indent=2)}")
             else:
                 self.logger.warning("Schema response from server is empty. Starting with an empty schema.")
                 schema_dict = {}
@@ -245,20 +247,27 @@ class MediaDataStoreManager:
             field_name_in_config = field_name_from_server.replace('_', '.')
             
             target_spec = field_spec
+            # Check for nested spec in array types
             if field_spec.get("type") == "array" and "items" in field_spec:
                 target_spec = field_spec["items"]
 
-            is_key_property = "keyPropertyMapping" in field_spec
+            is_key_property = "keyPropertyMapping" in target_spec
+            is_structural_type = target_spec.get("type") in ["object", "array"]
 
+            # Rule 1: If it's a structural key property (like 'image' or 'persons'), skip all annotations.
+            if is_key_property and is_structural_type:
+                self.logger.info(f"Field '{field_name_from_server}' is a structural key property. Skipping all annotations.")
+                continue
+
+            # Apply all settings from config first
+            for setting, fields_in_config in all_config_fields.items():
+                target_spec[setting] = field_name_in_config in fields_in_config
+
+            # Rule 2: If it's a simple key property (like 'hash_tags'), remove forbidden annotations.
             if is_key_property:
-                # For key properties, only update existing annotations
-                for setting, fields_in_config in all_config_fields.items():
-                    if setting in target_spec:
-                        target_spec[setting] = field_name_in_config in fields_in_config
-            else:
-                # For normal fields, add or update all annotations
-                for setting, fields_in_config in all_config_fields.items():
-                    target_spec[setting] = field_name_in_config in fields_in_config
+                self.logger.info(f"Field '{field_name_from_server}' is a key property. Removing 'searchable' and 'indexable' annotations.")
+                target_spec.pop("searchable", None)
+                target_spec.pop("indexable", None)
 
         # 5. Construct the final Schema object for the update request
         final_struct_schema = {
