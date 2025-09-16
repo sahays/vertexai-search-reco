@@ -21,6 +21,7 @@ def create_engine_command(args: argparse.Namespace) -> int:
             datastore_id=args.datastore_id,
             engine_id=args.engine_id,
             display_name=args.display_name,
+            solution_type=args.solution_type.upper(),
             description=args.description,
             output_dir=Path(args.output_dir) if args.output_dir else None,
             subcommand="create"
@@ -30,7 +31,6 @@ def create_engine_command(args: argparse.Namespace) -> int:
         print(f"Engine ID: {result['engine_id']}")
         print(f"Display Name: {result['display_name']}")
         print(f"Datastore: {args.datastore_id}")
-        print(f"Industry Vertical: {result['industry_vertical']}")
         
         return 0
     except MediaDataStoreError as e:
@@ -153,10 +153,11 @@ def main():
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
     
     # Create engine command
-    create_parser = subparsers.add_parser("create", help="Create a new search engine")
+    create_parser = subparsers.add_parser("create", help="Create a new engine")
     create_parser.add_argument("datastore_id", help="Datastore ID to link engine to")
     create_parser.add_argument("engine_id", help="Unique engine ID")
     create_parser.add_argument("--display-name", required=True, help="Display name for the engine")
+    create_parser.add_argument("--solution-type", choices=['search', 'recommendation'], default='search', help="The solution type of the engine.")
     create_parser.add_argument("--description", help="Engine description")
     create_parser.set_defaults(func=create_engine_command)
     

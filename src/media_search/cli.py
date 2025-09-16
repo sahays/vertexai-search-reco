@@ -122,25 +122,35 @@ def search(ctx, engine_id: str, query_text: str, filters: list[str], facet_field
 
 
 @main.command()
+@click.argument('engine_id')
 @click.argument('query_text')
-@click.option('--engine-id', required=True, help='The ID of the search engine.')
+@click.option('--user-id', default='default-user', help='A unique identifier for the end user.')
+@click.option('--json', 'json_output', is_flag=True, help='Output the full JSON response to a file in --output-dir.')
 @click.pass_context
-def autocomplete(ctx, query_text: str, engine_id: str):
+def autocomplete(ctx, engine_id: str, query_text: str, user_id: str, json_output: bool):
     """Get autocomplete suggestions."""
     config_manager: ConfigManager = ctx.obj['config_manager']
     output_dir: Optional[Path] = ctx.obj['output_dir']
     log_dir: Optional[Path] = ctx.obj['log_dir']
     
+    if json_output and not output_dir:
+        console.print("[red]Error: --output-dir is required when using the --json flag.[/red]")
+        ctx.exit(1)
+        
     logger = setup_logging(log_dir, subcommand='autocomplete')
     logger.info("Media Search autocomplete command started")
 
     try:
         manager = SearchManager(config_manager)
         
+        # Only pass the output_dir if the json flag is set
+        effective_output_dir = output_dir if json_output else None
+        
         suggestions = asyncio.run(manager.autocomplete(
             query=query_text,
             engine_id=engine_id,
-            output_dir=output_dir
+            user_id=user_id,
+            output_dir=effective_output_dir
         ))
         
         console.print(f"\n[bold green]Suggestions for '{query_text}':[/bold green]")
@@ -150,6 +160,8 @@ def autocomplete(ctx, query_text: str, engine_id: str):
     except Exception as e:
         console.print(f"[red]Error: {e}[/red]")
         ctx.exit(1)
+
+
 
 
 @main.group()

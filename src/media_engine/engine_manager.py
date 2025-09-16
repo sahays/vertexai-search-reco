@@ -5,8 +5,7 @@ from pathlib import Path
 from datetime import datetime
 
 from google.cloud import discoveryengine_v1beta
-from google.cloud.discoveryengine_v1beta.types import Engine
-from google.cloud.discoveryengine_v1beta import IndustryVertical, SolutionType
+from google.cloud.discoveryengine_v1beta.types import Engine, SolutionType, IndustryVertical, CreateEngineRequest
 from google.protobuf.json_format import MessageToDict
 
 from .config import EngineConfig, EngineConfigManager
@@ -35,35 +34,47 @@ class MediaEngineManager:
     
     @handle_vertex_ai_error
     def create_engine(self, datastore_id: str, engine_id: str, display_name: str,
-                     description: Optional[str] = None,
+                     solution_type: str, description: Optional[str] = None,
                      output_dir: Optional[Path] = None, subcommand: str = "create") -> Dict[str, Any]:
-        """Create a VAIS Media search engine."""
-        self.logger.info(f"Creating media search engine: {engine_id}")
+        """Create a VAIS Media search or recommendation engine."""
+        self.logger.info(f"Creating media {solution_type.lower()} engine: {engine_id}")
         self.logger.debug(f"Engine parameters - ID: {engine_id}, Name: {display_name}, Datastore: {datastore_id}")
         
         parent = self.config_manager.get_engine_parent()
-        datastore_path = self.config_manager.get_datastore_path(datastore_id)
         
-        self.logger.debug(f"Parent: {parent}")
-        self.logger.debug(f"Datastore path: {datastore_path}")
+        if solution_type == "SEARCH":
+            solution_type_enum = SolutionType.SOLUTION_TYPE_SEARCH
+        else:
+            solution_type_enum = SolutionType.SOLUTION_TYPE_RECOMMENDATION
+
+        engine_config = {
+            "display_name": display_name,
+            "data_store_ids": [datastore_id],
+            "solution_type": solution_type_enum,
+            "industry_vertical": IndustryVertical.MEDIA,
+        }
+
+        if solution_type == "RECOMMENDATION":
+            # Note: Advanced MediaRecommendationEngineConfig not available in current SDK version
+            # The engine will be created as a basic recommendation engine
+            # Advanced features like "For You" and CTR optimization may need to be configured
+            # through the Google Cloud Console or a newer SDK version
+            self.logger.warning(
+                "Creating basic recommendation engine. Advanced features like 'For You' "
+                "recommendations and CTR optimization may need to be configured via Console."
+            )
+
+        engine = Engine(**engine_config)
         
-        # Validate that datastore exists and is MEDIA industry vertical
-        self._validate_datastore_compatibility(datastore_path)
-        
-        # Build engine with MEDIA industry vertical using proper enum values
-        engine = Engine(
-            display_name=display_name,
-            data_store_ids=[datastore_id],
-            solution_type=SolutionType.SOLUTION_TYPE_SEARCH
-        )
-        
-        # Create engine (this returns a long-running operation)
-        self.logger.info(f"Creating engine with parent: {parent}")
-        operation = self.engine_client.create_engine(
+        request = CreateEngineRequest(
             parent=parent,
             engine=engine,
-            engine_id=engine_id
+            engine_id=engine_id,
         )
+
+        # Create engine (this returns a long-running operation)
+        self.logger.info(f"Creating engine with parent: {parent}")
+        operation = self.engine_client.create_engine(request=request)
         
         # Wait for the operation to complete
         self.logger.info("Waiting for engine creation to complete...")
@@ -74,15 +85,14 @@ class MediaEngineManager:
             "engine_id": engine_id,
             "engine_name": created_engine.name,
             "display_name": created_engine.display_name,
-            "description": description or f"Media search engine for {datastore_id}",  # Use provided description
+            "description": description or f"Media {solution_type.lower()} engine for {datastore_id}",
             "datastore_ids": list(created_engine.data_store_ids),
             "solution_type": str(created_engine.solution_type),
-            "industry_vertical": str(created_engine.industry_vertical),
             "create_time": created_engine.create_time.isoformat() if created_engine.create_time else None,
             "creation_timestamp": datetime.now().isoformat()
         }
         
-        self.logger.info(f"Successfully created media search engine: {engine_id}")
+        self.logger.info(f"Successfully created media {solution_type.lower()} engine: {engine_id}")
         
         if output_dir:
             output_file = save_output(engine_info, output_dir, f"engine_{engine_id}_created.json", subcommand)

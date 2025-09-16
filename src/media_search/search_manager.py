@@ -95,21 +95,22 @@ class SearchManager:
         return search_response
 
     @handle_vertex_ai_error
-    async def autocomplete(self, query: str, engine_id: str, output_dir: Optional[Path] = None) -> List[str]:
+    async def autocomplete(self, query: str, engine_id: str, user_id: str = "default-user", output_dir: Optional[Path] = None) -> List[str]:
         """Performs an autocomplete request."""
-        self.logger.info(f"Performing autocomplete for query: '{query}' on engine: {engine_id}")
+        self.logger.info(f"Performing autocomplete for query: '{query}' on data store: {engine_id}")
 
-        data_store = self.completion_client.data_store_path(
+        # Autocomplete uses a data_store path, but it's constructed at the location level.
+        parent_path = self.completion_client.common_location_path(
             project=self.config_manager.vertex_ai.project_id,
             location=self.config_manager.vertex_ai.location,
-            data_store=engine_id,
         )
+        data_store_path = f"{parent_path}/dataStores/{engine_id}"
 
         request = discoveryengine_v1beta.CompleteQueryRequest(
-            data_store=data_store,
+            data_store=data_store_path,
             query=query,
-            query_model="page-level",
-            user_pseudo_id="user-123", # This should be a unique identifier for the user
+            query_model="document-completable",
+            user_pseudo_id=user_id,
         )
 
         response = self.completion_client.complete_query(request)
