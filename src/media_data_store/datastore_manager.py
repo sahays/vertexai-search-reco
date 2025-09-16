@@ -86,7 +86,7 @@ class MediaDataStoreManager:
         """Import data from BigQuery into the media data store."""
         self.logger.info(f"Starting BigQuery import for data store: {data_store_id}")
         
-        parent = self.schema_client.branch_path(
+        parent = self.document_client.branch_path(
             project=self.config_manager.vertex_ai.project_id,
             location=self.config_manager.vertex_ai.location,
             data_store=data_store_id,
@@ -201,7 +201,7 @@ class MediaDataStoreManager:
             self.logger.info(f"Fetching existing schema from: {schema_name}")
             request = GetSchemaRequest(name=schema_name)
             raw_schema_response = self.schema_client.get_schema(request=request)
-            # self.logger.info(raw_schema_response)
+            self.logger.info(raw_schema_response)
             self.logger.info("Successfully fetched raw schema response.")
         except Exception as e:
             self.logger.error(f"Failed to fetch schema for data store '{data_store_id}'. Error: {e}")
@@ -234,7 +234,7 @@ class MediaDataStoreManager:
         import copy
         updated_schema_properties = copy.deepcopy(current_schema_properties)
 
-                # 4. Apply settings from config to the copied schema
+        # 4. Apply settings from config to the copied schema
         all_config_fields_map = {
             'retrievable': set(schema_config.retrievable_fields),
             'searchable': set(schema_config.searchable_fields),
@@ -242,13 +242,18 @@ class MediaDataStoreManager:
             'completable': set(schema_config.completable_fields),
             'dynamicFacetable': set(schema_config.dynamic_facetable_fields)
         }
-        # Create a single set of all field names mentioned in the config for easy lookup
         all_config_field_names = set().union(*all_config_fields_map.values())
+
+        # If the schema is empty, build it from the config file
+        if not updated_schema_properties:
+            self.logger.info("Schema is empty, building from config file.")
+            for field_name in all_config_field_names:
+                # Default to string type. Add more complex logic here if needed.
+                updated_schema_properties[field_name] = {"type": "string"}
 
         for field_name_from_server, field_spec in updated_schema_properties.items():
             
             # Determine the correct field name to use for config lookup.
-            # Handles cases like 'original_payload' -> 'original.payload'
             potential_dotted_name = field_name_from_server.replace('_', '.')
             field_name_in_config = (
                 potential_dotted_name
@@ -257,16 +262,11 @@ class MediaDataStoreManager:
             )
             
             target_spec = field_spec
-            # For array types, the settings apply to the 'items' sub-spec
             if field_spec.get("type") == "array" and "items" in field_spec:
                 target_spec = field_spec["items"]
 
-            # Apply all settings from the configuration to the target spec
             for setting, fields_in_config in all_config_fields_map.items():
                 is_in_config = field_name_in_config in fields_in_config
-                
-                # Only set the value if it's explicitly true in the config.
-                # Do not set to false, as that might override server defaults.
                 if is_in_config:
                     target_spec[setting] = True
 

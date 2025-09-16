@@ -1,88 +1,150 @@
 {
-  "schema_mapping": {
-    "source_to_google": {
-      "movie_title": "title",
-      "video_file_url": "uri", 
-      "genre_list": "categories",
-      "release_datetime": "available_time",
-      "runtime_formatted": "duration",
-      "plot_summary": "content",
-      "primary_language": "language",
-      "imdb_rating": "rating",
-      "cast_and_crew": "persons",
-      "production_companies": "organizations"
-    }
-  },
-  "value_transformations": {
-    "genre_list": {
-      "type": "array_to_google_categories",
-      "description": "Convert genre array to Google's supported media categories"
-    },
-    "runtime_formatted": {
-      "type": "validate_google_duration_format", 
-      "description": "Ensure duration is in Google's required format (e.g. '1h30m')"
-    },
-    "release_datetime": {
-      "type": "validate_rfc3339_datetime",
-      "description": "Ensure datetime is valid RFC 3339 format"
-    },
-    "video_file_url": {
-      "type": "validate_uri_limits",
-      "description": "Ensure URI is valid and under 5000 characters"
-    },
-    "movie_title": {
-      "type": "validate_title_limits", 
-      "description": "Ensure title is under 1000 characters"
-    },
-    "cast_and_crew": {
-      "type": "transform_to_person_objects",
-      "description": "Convert cast array to Google's person object format with name and role"
-    },
-    "production_companies": {
-      "type": "transform_to_organization_objects",
-      "description": "Convert company array to Google's organization object format"
-    }
-  },
-  "validation_rules": {
-    "custom_schema_compliance": true,
-    "google_field_mapping": true,
-    "strict_type_checking": true,
-    "enforce_required_mappings": [
-      "movie_title",
-      "video_file_url", 
-      "genre_list",
-      "release_datetime",
-      "runtime_formatted"
-    ]
-  },
-  "field_behavior_config": {
-    "searchable": {
-      "movie_title": {
-        "boost": 2.0,
-        "exact_match_boost": 1.5
-      },
-      "plot_summary": {
-        "boost": 1.0
-      },
-      "genre_list": {
-        "boost": 1.2
-      }
-    },
-    "facetable": {
-      "genre_list": {
-        "max_values": 10
-      },
-      "primary_language": {
-        "max_values": 20
-      },
-      "imdb_rating": {
-        "type": "numerical_range"
-      }
-    },
-    "completable": {
-      "movie_title": {
-        "min_query_length": 2
-      }
-    }
-  }
+	"schema_mapping": {
+		"source_to_google": {
+			"title": "title",
+			"image": "uri",
+			"genre": "categories",
+			"release_date": "available_time",
+			"episode_count": "duration",
+			"desc": "content",
+			"audio_lang": "language",
+			"age_rating": "rating",
+			"actors": "persons",
+			"directors": "persons"
+		}
+	},
+	"value_transformations": {
+		"genre": {
+			"type": "array_to_google_categories",
+			"description": "Convert genre array to Google's supported media categories",
+			"mapping": {
+				"Comedy": "comedy",
+				"Romance": "romance",
+				"Drama": "drama",
+				"Horror": "horror",
+				"Action": "action",
+				"Animation": "animation",
+				"Entertainment": "entertainment",
+				"Family": "family",
+				"Tragedy": "drama",
+				"Teen Drama": "drama",
+				"Talk Show": "show",
+				"Educational": "educational",
+				"Technology": "educational"
+			}
+		},
+		"episode_count": {
+			"type": "convert_count_to_duration_estimate",
+			"description": "Convert episode count to estimated duration format",
+			"formula": "episodes * 5m (assuming 5min micro episodes)"
+		},
+		"release_date": {
+			"type": "validate_rfc3339_datetime",
+			"description": "Ensure datetime is valid RFC 3339 format"
+		},
+		"image": {
+			"type": "convert_to_media_uri",
+			"description": "Convert image ID to full GCS URI and validate length",
+			"uri_template": "gs://media-bucket/images/{image_id}.jpg"
+		},
+		"title": {
+			"type": "validate_title_limits",
+			"description": "Ensure title is under 1000 characters"
+		},
+		"actors": {
+			"type": "transform_to_person_objects",
+			"description": "Convert actor arrays to Google's person object format",
+			"handle_empty_arrays": true,
+			"role": "actor"
+		},
+		"directors": {
+			"type": "transform_to_person_objects",
+			"description": "Convert director arrays to Google's person object format",
+			"handle_empty_arrays": true,
+			"role": "director"
+		},
+		"audio_lang": {
+			"type": "normalize_language_code",
+			"description": "Convert language codes to BCP 47 format",
+			"mapping": {
+				"hi": "hi-IN",
+				"mr": "mr-IN",
+				"ta": "ta-IN",
+				"bn": "bn-IN",
+				"ml": "ml-IN",
+				"kn": "kn-IN",
+				"te": "te-IN",
+				"en": "en-US",
+				"NULL": null
+			}
+		},
+		"content_language": {
+			"type": "normalize_language_array",
+			"description": "Convert content language arrays to BCP 47 format"
+		},
+		"extended.digital_keywords": {
+			"type": "extract_and_tokenize",
+			"description": "Extract keywords from extended metadata for search"
+		},
+		"rights": {
+			"type": "normalize_rights_array",
+			"description": "Convert rights strings to structured format"
+		}
+	},
+	"field_processing": {
+		"flatten_extended_fields": {
+			"enabled": true,
+			"fields": ["content_category", "digital_keywords", "content_version", "content_descriptors"]
+		},
+		"handle_null_values": {
+			"enabled": true,
+			"null_strings": ["NULL", "null", ""],
+			"replace_with": null
+		},
+		"consolidate_person_fields": {
+			"enabled": true,
+			"merge_fields": ["actors", "directors"],
+			"target_field": "persons"
+		},
+		"extract_from_nested": {
+			"country_meta": {
+				"extract_license_dates": true,
+				"extract_business_types": true
+			}
+		}
+	},
+	"validation_rules": {
+		"custom_schema_compliance": true,
+		"google_field_mapping": true,
+		"strict_type_checking": false,
+		"enforce_required_mappings": ["title", "image", "genre", "release_date", "episode_count"],
+		"handle_missing_fields": {
+			"actors": "create_empty_array",
+			"directors": "create_empty_array",
+			"primary_language": "use_audio_lang",
+			"content_language": "create_empty_array"
+		}
+	},
+	"google_compliance": {
+		"required_field_limits": {
+			"title_max_length": 1000,
+			"uri_max_length": 5000,
+			"categories_max_count": 250
+		},
+		"supported_media_categories": [
+			"movie",
+			"show",
+			"comedy",
+			"drama",
+			"romance",
+			"horror",
+			"action",
+			"animation",
+			"family",
+			"educational",
+			"entertainment"
+		],
+		"duration_format": "Convert episode count to Google duration format",
+		"datetime_format": "Ensure RFC 3339 compliance"
+	}
 }

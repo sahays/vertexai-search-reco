@@ -195,7 +195,7 @@ def create_datastore(ctx, data_store_id: str, display_name: Optional[str], conte
         
         console.print(f"[blue]Creating media data store: {data_store_id}...[/blue]")
         
-        result = ds_manager.create_data_store(data_store_id, display_name, content_config, None, output_dir, 'create')
+        result = ds_manager.create_data_store(data_store_id, display_name, content_config, output_dir, 'create')
         
         console.print(f"[green]✓ Media data store created: {result['name']}[/green]")
         console.print(f"Industry Vertical: {result['industry_vertical']}")
