@@ -6,6 +6,7 @@ import click
 from google.cloud import bigquery
 from config import Config
 
+
 class BigQueryOperations:
     """Handle all BigQuery related operations"""
 
@@ -25,7 +26,9 @@ class BigQueryOperations:
 
     def upload_csv_to_table(self, csv_file, table_id):
         """Upload CSV file to BigQuery table"""
-        click.echo(f"Uploading {csv_file} to {Config.PROJECT_ID}.{Config.DATASET_ID}.{table_id}")
+        click.echo(
+            f"Uploading {csv_file} to {Config.PROJECT_ID}.{Config.DATASET_ID}.{table_id}"
+        )
         try:
             self.ensure_dataset_exists()
 
@@ -33,14 +36,14 @@ class BigQueryOperations:
                 source_format=bigquery.SourceFormat.CSV,
                 skip_leading_rows=1,
                 autodetect=True,
-                write_disposition=bigquery.WriteDisposition.WRITE_TRUNCATE
+                write_disposition=bigquery.WriteDisposition.WRITE_TRUNCATE,
             )
 
             with open(csv_file, "rb") as source_file:
                 job = self.client.load_table_from_file(
                     source_file,
                     f"{Config.PROJECT_ID}.{Config.DATASET_ID}.{table_id}",
-                    job_config=job_config
+                    job_config=job_config,
                 )
 
             job.result()
@@ -52,12 +55,14 @@ class BigQueryOperations:
 
     def upload_json_to_table(self, json_file, table_id):
         """Upload JSON file to BigQuery table - handles both JSON arrays and NDJSON"""
-        click.echo(f"Uploading {json_file} to {Config.PROJECT_ID}.{Config.DATASET_ID}.{table_id}")
+        click.echo(
+            f"Uploading {json_file} to {Config.PROJECT_ID}.{Config.DATASET_ID}.{table_id}"
+        )
         try:
             self.ensure_dataset_exists()
 
             # Read and convert JSON array to NDJSON if needed
-            with open(json_file, 'r') as f:
+            with open(json_file, "r") as f:
                 data = json.load(f)
 
             def clean_for_bigquery(obj):
@@ -66,7 +71,9 @@ class BigQueryOperations:
                     cleaned = {}
                     for key, value in obj.items():
                         # Replace special characters in field names
-                        clean_key = key.replace('-', '_').replace(' ', '_').replace('.', '_')
+                        clean_key = (
+                            key.replace("-", "_").replace(" ", "_").replace(".", "_")
+                        )
                         cleaned[clean_key] = clean_for_bigquery(value)
                     return cleaned
                 elif isinstance(obj, list):
@@ -76,24 +83,24 @@ class BigQueryOperations:
                     return obj
 
             # Create JSONL file in outputs folder
-            outputs_dir = 'outputs'
+            outputs_dir = "outputs"
             os.makedirs(outputs_dir, exist_ok=True)
             jsonl_file_path = os.path.join(outputs_dir, f"{table_id}.jsonl")
 
             click.echo(f"💾 Saving JSONL file to {jsonl_file_path}")
 
-            with open(jsonl_file_path, 'w') as jsonl_file:
+            with open(jsonl_file_path, "w") as jsonl_file:
                 if isinstance(data, list):
                     # Convert JSON array to NDJSON
                     for item in data:
                         cleaned_item = clean_for_bigquery(item)
                         json.dump(cleaned_item, jsonl_file)
-                        jsonl_file.write('\n')
+                        jsonl_file.write("\n")
                 else:
                     # Single JSON object
                     cleaned_item = clean_for_bigquery(data)
                     json.dump(cleaned_item, jsonl_file)
-                    jsonl_file.write('\n')
+                    jsonl_file.write("\n")
 
             # Upload the JSONL file
             job_config = bigquery.LoadJobConfig(
@@ -101,14 +108,14 @@ class BigQueryOperations:
                 autodetect=True,
                 write_disposition=bigquery.WriteDisposition.WRITE_TRUNCATE,
                 ignore_unknown_values=True,  # Ignore unknown fields
-                max_bad_records=10  # Allow some bad records
+                max_bad_records=10,  # Allow some bad records
             )
 
             with open(jsonl_file_path, "rb") as source_file:
                 job = self.client.load_table_from_file(
                     source_file,
                     f"{Config.PROJECT_ID}.{Config.DATASET_ID}.{table_id}",
-                    job_config=job_config
+                    job_config=job_config,
                 )
 
             job.result()
@@ -121,16 +128,18 @@ class BigQueryOperations:
 
     def upload_data_to_table(self, data_file, table_id):
         """Upload data file (CSV or JSON) to BigQuery table - auto-detects format"""
-        if data_file.lower().endswith('.csv'):
+        if data_file.lower().endswith(".csv"):
             return self.upload_csv_to_table(data_file, table_id)
-        elif data_file.lower().endswith('.json') or data_file.lower().endswith('.jsonl'):
+        elif data_file.lower().endswith(".json") or data_file.lower().endswith(
+            ".jsonl"
+        ):
             return self.upload_json_to_table(data_file, table_id)
         else:
             # Try to detect based on content
             try:
-                with open(data_file, 'r') as f:
+                with open(data_file, "r") as f:
                     first_line = f.readline().strip()
-                    if first_line.startswith('{'):
+                    if first_line.startswith("{"):
                         click.echo("Detected JSON format")
                         return self.upload_json_to_table(data_file, table_id)
                     else:
@@ -144,10 +153,14 @@ class BigQueryOperations:
         """Create BigQuery view to transform data to Vertex AI format using declarative field definitions."""
         click.echo(f"Creating transform view {view_name} from {raw_table}")
         try:
+
             def escape_field_name(field_name, add_alias=True):
                 """Escape field names for BigQuery SQL."""
-                if not field_name: return None
-                escaped_parts = '.'.join([f"`{part}`" for part in field_name.split('.')])
+                if not field_name:
+                    return None
+                escaped_parts = ".".join(
+                    [f"`{part}`" for part in field_name.split(".")]
+                )
                 return f"t.{escaped_parts}" if add_alias else escaped_parts
 
             def safe_array_transform(source_field_sql):
@@ -159,18 +172,30 @@ class BigQueryOperations:
                 return f"CASE WHEN CAST({source_field_sql} AS STRING) = 'NULL' THEN NULL ELSE CAST({source_field_sql} AS STRING) END"
 
             # Build field references from field_mappings
-            id_field = escape_field_name(field_mappings['id_field'])
-            title_field = escape_field_name(field_mappings['title_field'])
-            categories_field = escape_field_name(field_mappings.get('categories_field')) or "CAST(NULL AS ARRAY<STRING>)"
+            id_field = escape_field_name(field_mappings["id_field"])
+            title_field = escape_field_name(field_mappings["title_field"])
+            categories_field = (
+                escape_field_name(field_mappings.get("categories_field"))
+                or "CAST(NULL AS ARRAY<STRING>)"
+            )
 
-            available_time_expr = escape_field_name(field_mappings.get('available_time_field')) or "TIMESTAMP('2024-01-01T00:00:00Z')"
-            expire_time_expr = escape_field_name(field_mappings.get('expire_time_field')) or "TIMESTAMP('2030-01-01T00:00:00Z')"
+            available_time_expr = (
+                escape_field_name(field_mappings.get("available_time_field"))
+                or "TIMESTAMP('2024-01-01T00:00:00Z')"
+            )
+            expire_time_expr = (
+                escape_field_name(field_mappings.get("expire_time_field"))
+                or "TIMESTAMP('2030-01-01T00:00:00Z')"
+            )
 
             # Create media_type mapping with proper content_category to media_type conversion
-            raw_media_type_field = escape_field_name(field_mappings.get('media_type_field')) or "'video'"
+            raw_media_type_field = (
+                escape_field_name(field_mappings.get("media_type_field")) or "'video'"
+            )
             media_type_field = f"""CASE
                 WHEN UPPER({raw_media_type_field}) LIKE '%MOVIE%' THEN 'movie'
                 WHEN UPPER({raw_media_type_field}) LIKE '%MICRO DRAMA%' THEN 'show'
+                WHEN UPPER({raw_media_type_field}) LIKE '%ACQUIRED%' THEN 'show'
                 WHEN UPPER({raw_media_type_field}) LIKE '%DRAMA%' THEN 'show'
                 WHEN UPPER({raw_media_type_field}) LIKE '%SERIES%' THEN 'tv-series'
                 WHEN UPPER({raw_media_type_field}) LIKE '%EPISODE%' THEN 'episode'
@@ -193,7 +218,10 @@ class BigQueryOperations:
                 ELSE 'video'
             END"""
 
-            uri_field = escape_field_name(field_mappings.get('uri_field')) or f"CONCAT('https://media.example.com/', CAST({id_field} AS STRING))"
+            uri_field = (
+                escape_field_name(field_mappings.get("uri_field"))
+                or f"CONCAT('https://media.example.com/', CAST({id_field} AS STRING))"
+            )
 
             struct_fields = [
                 f"{safe_string_transform(title_field)} AS title",
@@ -201,11 +229,11 @@ class BigQueryOperations:
                 f"{uri_field} AS uri",
                 f"FORMAT_TIMESTAMP('%Y-%m-%dT%H:%M:%SZ', {available_time_expr}) AS available_time",
                 f"FORMAT_TIMESTAMP('%Y-%m-%dT%H:%M:%SZ', {expire_time_expr}) AS expire_time",
-                f"({media_type_field}) AS media_type"
+                f"({media_type_field}) AS media_type",
             ]
 
             # Add custom fields using declarative definitions (no schema introspection)
-            custom_fields = field_mappings.get('custom_fields', {})
+            custom_fields = field_mappings.get("custom_fields", {})
             for key, field_info in custom_fields.items():
                 source_field_name = field_info.get("name")
                 field_type = field_info.get("type", "string")
@@ -218,12 +246,12 @@ class BigQueryOperations:
                         # Handle arrays with proper empty string and null handling
                         transformed_field = safe_array_transform(source_field_sql)
                         struct_fields.append(f"{transformed_field} AS {alias}")
-                    else: # Handle string and other types
+                    else:  # Handle string and other types
                         # Handle strings with proper empty string and null handling
                         transformed_field = safe_string_transform(source_field_sql)
                         struct_fields.append(f"{transformed_field} AS {alias}")
 
-            if field_mappings.get('include_original_payload', True):
+            if field_mappings.get("include_original_payload", True):
                 struct_fields.append("TO_JSON_STRING(t) AS original_payload")
 
             json_data_expr = f"TO_JSON_STRING(STRUCT({', '.join(struct_fields)}))"
@@ -239,10 +267,10 @@ FROM `{Config.PROJECT_ID}.{Config.DATASET_ID}.{raw_table}` AS t
 WHERE {id_field} IS NOT NULL
 """
 
-            outputs_dir = 'outputs'
+            outputs_dir = "outputs"
             os.makedirs(outputs_dir, exist_ok=True)
             sql_file_path = os.path.join(outputs_dir, f"{view_name}_create_view.sql")
-            with open(sql_file_path, 'w') as sql_file:
+            with open(sql_file_path, "w") as sql_file:
                 sql_file.write(sql_query)
 
             click.echo("📝 Generated SQL Query:")
@@ -270,14 +298,18 @@ WHERE {id_field} IS NOT NULL
             source_format=bigquery.SourceFormat.CSV,
             skip_leading_rows=1,
             autodetect=True,
-            write_disposition=bigquery.WriteDisposition.WRITE_APPEND if append else bigquery.WriteDisposition.WRITE_TRUNCATE
+            write_disposition=(
+                bigquery.WriteDisposition.WRITE_APPEND
+                if append
+                else bigquery.WriteDisposition.WRITE_TRUNCATE
+            ),
         )
 
         with open(csv_file, "rb") as source_file:
             job = self.client.load_table_from_file(
                 source_file,
                 f"{Config.PROJECT_ID}.{Config.DATASET_ID}.user_events",
-                job_config=job_config
+                job_config=job_config,
             )
 
         job.result()
@@ -294,14 +326,18 @@ WHERE {id_field} IS NOT NULL
             source_format=bigquery.SourceFormat.CSV,
             skip_leading_rows=1,
             autodetect=True,
-            write_disposition=bigquery.WriteDisposition.WRITE_APPEND if append else bigquery.WriteDisposition.WRITE_TRUNCATE
+            write_disposition=(
+                bigquery.WriteDisposition.WRITE_APPEND
+                if append
+                else bigquery.WriteDisposition.WRITE_TRUNCATE
+            ),
         )
 
         with open(csv_file, "rb") as source_file:
             job = self.client.load_table_from_file(
                 source_file,
                 f"{Config.PROJECT_ID}.{Config.DATASET_ID}.{table_name}",
-                job_config=job_config
+                job_config=job_config,
             )
 
         job.result()
