@@ -3,9 +3,13 @@ __pycache__/
 *.py[codz]
 *$py.class
 
+.DS_Store
+
 customer_*
 customer_config.json
 customer_schema.json
+*.ipynb
+internal-impl*
 
 *output*
 *logs*

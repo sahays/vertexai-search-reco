@@ -28,3 +28,9 @@ class ConfigManager:
     @property
     def vertex_ai(self) -> VertexAIConfig:
         return self.config.vertex_ai
+
+    def get_data_store_id(self) -> str:
+        """Returns the data_store_id from the config."""
+        if self.config.vertex_ai.data_store_id:
+            return self.config.vertex_ai.data_store_id
+        return ""

@@ -29,22 +29,23 @@ class MediaSchemaMapper:
             self.logger.warning(f"Could not parse datetime: {value}. Leaving as is.")
             return value
 
-    def _convert_count_to_duration(self, episode_count: Any) -> str:
-        """Converts an episode count to a Google duration string."""
+    def _convert_count_to_duration(self, episode_count: Any) -> Optional[str]:
+        """
+        Converts an episode count to a Google duration string in total seconds.
+        Returns None if the duration is zero.
+        """
         try:
             count = int(episode_count)
-            total_minutes = count * 5  # Assuming 5 minutes per episode as per mapping file
-            if total_minutes < 60:
-                return f"{total_minutes}m"
-            else:
-                hours = total_minutes // 60
-                minutes = total_minutes % 60
-                if minutes > 0:
-                    return f"{hours}h{minutes}m"
-                return f"{hours}h"
+            total_seconds = count * 5 * 60  # Assuming 5 minutes per episode
+            
+            if total_seconds == 0:
+                return None  # Omit the field if duration is zero
+            
+            return f"{total_seconds}s"
+            
         except (ValueError, TypeError):
-            self.logger.warning(f"Invalid episode_count: {episode_count}. Defaulting to empty duration.")
-            return ""
+            self.logger.warning(f"Invalid episode_count: {episode_count}. Omitting duration.")
+            return None
 
     def _transform_record(self, record: Dict[str, Any], mapping_config: Dict[str, Any], include_original: bool) -> Dict[str, Any]:
         """Transforms a single data record based on the mapping configuration."""
@@ -56,7 +57,6 @@ class MediaSchemaMapper:
         # 1. Apply basic field mapping
         for source_field, google_field in field_mapping.items():
             if source_field in record and record[source_field] is not None:
-                # Skip person fields for now, they will be handled by consolidation
                 if google_field == "persons":
                     continue
                 transformed_record[google_field] = record[source_field]
@@ -67,14 +67,13 @@ class MediaSchemaMapper:
             target_field = consolidation_rules.get("target_field")
             persons = []
             for source_field in consolidation_rules.get("merge_fields", []):
-                role = source_field.rstrip('s') # 'actors' -> 'actor'
+                role = source_field.rstrip('s')
                 if source_field in record and isinstance(record[source_field], list):
                     for person_name in record[source_field]:
                         if isinstance(person_name, str) and person_name.strip():
                              persons.append({"name": person_name.strip(), "role": role})
             if persons:
                 transformed_record[target_field] = persons
-
 
         # 3. Apply value transformations
         for source_field, transform_config in value_transformations.items():
@@ -86,22 +85,27 @@ class MediaSchemaMapper:
                 if transform_type == "validate_rfc3339_datetime":
                     transformed_record[google_field] = self._validate_rfc3339_datetime(value)
                 elif transform_type == "convert_count_to_duration_estimate":
-                    transformed_record[google_field] = self._convert_count_to_duration(value)
+                    duration_str = self._convert_count_to_duration(value)
+                    if duration_str:
+                        transformed_record[google_field] = duration_str
+                    else:
+                        # Remove the field if duration is zero/invalid
+                        transformed_record.pop(google_field, None)
 
         if include_original:
             transformed_record["original_payload"] = json.dumps(record)
 
-        # 4. Add a unique ID if not present
+        # 4. Add a unique ID
         source_id_field = self.config_manager.schema.field_mappings.id_source_field
         if source_id_field in record and record[source_id_field] is not None:
             doc_id = str(record[source_id_field])
             transformed_record["id"] = doc_id
-            transformed_record["_id"] = doc_id  # Add the required _id field
+            transformed_record["_id"] = doc_id
         else:
             import uuid
             doc_id = str(uuid.uuid4())
             transformed_record["id"] = doc_id
-            transformed_record["_id"] = doc_id  # Add the required _id field
+            transformed_record["_id"] = doc_id
             self.logger.warning(f"Source data missing '{source_id_field}'. Generated new UUID: {doc_id}")
 
         return transformed_record

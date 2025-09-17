@@ -30,13 +30,17 @@ class SearchManager:
                      facet_fields: List[str] = [], page_size: int = 10, offset: int = 0,
                      json_output: bool = False, output_dir: Optional[Path] = None) -> Dict[str, Any]:
         """Performs a search request."""
-        self.logger.info(f"Performing search for query: '{query}' on data store: {engine_id}")
+        data_store_id = self.config_manager.get_data_store_id()
+        if not data_store_id:
+            raise MediaDataStoreError("`data_store_id` not found in the configuration file.")
+
+        self.logger.info(f"Performing search for query: '{query}' on engine: {engine_id}")
 
         serving_config = self.search_client.serving_config_path(
             project=self.config_manager.vertex_ai.project_id,
             location=self.config_manager.vertex_ai.location,
-            data_store=engine_id,
-            serving_config="default_serving_config",
+            data_store=data_store_id,
+            serving_config=engine_id,
         )
 
         # Build facet specs

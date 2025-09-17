@@ -11,6 +11,8 @@ class VertexAIConfig(BaseModel):
     """Vertex AI configuration for media search."""
     project_id: str
     location: str = "global"
+    data_store_id: Optional[str] = None
+
 
 
 class CustomSchemaMapping(BaseModel):
