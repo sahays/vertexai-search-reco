@@ -15,12 +15,14 @@ class Config:
     LOCATION = "asia-south1"
 
     @classmethod
-    def set_config(cls, project_id, dataset_id=None, datastore_id=None, location=None):
+    def set_config(cls, project_id, dataset_id=None, datastore_id=None, engine_id=None, location=None):
         cls.PROJECT_ID = project_id
         if dataset_id:
             cls.DATASET_ID = dataset_id
         if datastore_id:
             cls.DATASTORE_ID = datastore_id
+        if engine_id:
+            cls.ENGINE_ID = engine_id
         if location:
             cls.LOCATION = location
 

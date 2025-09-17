@@ -4,6 +4,8 @@ import json
 import click
 import requests
 import time
+import os
+from datetime import datetime
 from config import Config, get_headers
 
 class SearchOperations:
@@ -12,21 +14,33 @@ class SearchOperations:
     def __init__(self):
         self.headers = get_headers()
 
-    def search(self, query, filters=None, page_size=10, facets=True):
-        """Search the media collection"""
-        click.echo(f"Searching for: {query}")
+    def search(self, query, datastore_id=None, engine_id=None, filters=None, page_size=10, facets=True):
+        """Semantic search with comprehensive filtering support"""
+        click.echo(f"🔍 Semantic search for: {query}")
 
-        url = f"https://discoveryengine.googleapis.com/v1/projects/{Config.PROJECT_ID}/locations/global/collections/default_collection/engines/{Config.ENGINE_ID}/servingConfigs/default_search:search"
+        # Use provided IDs or fall back to config
+        ds_id = datastore_id or Config.DATASTORE_ID
+        eng_id = engine_id or Config.ENGINE_ID
+
+        click.echo(f"📊 Using datastore: {ds_id}, engine: {eng_id}")
+
+        url = f"https://discoveryengine.googleapis.com/v1/projects/{Config.PROJECT_ID}/locations/global/collections/default_collection/engines/{eng_id}/servingConfigs/default_search:search"
 
         payload = {
             "query": query,
-            "pageSize": page_size
+            "pageSize": page_size,
+            "queryExpansionSpec": {"condition": "AUTO"},
+            "spellCorrectionSpec": {"mode": "AUTO"}
         }
 
         if facets:
             payload["facetSpecs"] = [
-                {"facetKey": {"key": "categories"}},
-                {"facetKey": {"key": "media_type"}}
+                {"facetKey": {"key": "categories"}, "limit": 20},
+                {"facetKey": {"key": "media_type"}, "limit": 20},
+                {"facetKey": {"key": "directors"}, "limit": 10},
+                {"facetKey": {"key": "actors"}, "limit": 10},
+                {"facetKey": {"key": "primary_language"}, "limit": 10},
+                {"facetKey": {"key": "age_rating"}, "limit": 5}
             ]
 
         if filters:
@@ -37,6 +51,34 @@ class SearchOperations:
             response.raise_for_status()
 
             results = response.json()
+
+            # Parse original_payload strings to JSON objects in the results
+            if 'results' in results:
+                for result in results['results']:
+                    doc = result.get('document', {})
+                    struct_data = doc.get('structData', {})
+                    original_payload = struct_data.get('original_payload')
+
+                    if original_payload and isinstance(original_payload, str):
+                        try:
+                            struct_data['original_payload'] = json.loads(original_payload)
+                        except json.JSONDecodeError:
+                            # Keep as string if parsing fails
+                            pass
+
+            # Print the full server response
+            click.echo("🔍 Full Server Response:")
+            click.echo(json.dumps(results, indent=2, ensure_ascii=False))
+
+            # Save JSON result to outputs directory (overwrite)
+            os.makedirs('outputs', exist_ok=True)
+            filename = "outputs/search_results.json"
+
+            with open(filename, 'w', encoding='utf-8') as f:
+                json.dump(results, f, indent=2, ensure_ascii=False)
+
+            click.echo(f"\n💾 Results saved to: {filename}")
+
             self._display_search_results(results)
             return results
 
@@ -45,10 +87,6 @@ class SearchOperations:
             click.echo(f"Response: {e.response.text}")
             return None
 
-    def semantic_search(self, query, page_size=10):
-        """Perform semantic search (uses natural language understanding)"""
-        click.echo(f"Semantic search for: {query}")
-        return self.search(query, page_size=page_size)
 
     def get_recommendations(self, user_pseudo_id, document_id=None, page_size=10):
         """Get recommendations for a user"""
@@ -143,10 +181,27 @@ class SearchOperations:
                 doc = result.get('document', {})
                 struct_data = doc.get('structData', {})
 
+                # Parse original_payload if it exists and is a string
+                original_payload = struct_data.get('original_payload')
+                original_data = {}
+                if original_payload and isinstance(original_payload, str):
+                    try:
+                        original_data = json.loads(original_payload)
+                    except json.JSONDecodeError:
+                        click.echo(f"   ⚠️ Failed to parse original_payload as JSON")
+
                 click.echo(f"\n{i}. {struct_data.get('title', 'No title')}")
                 click.echo(f"   ID: {doc.get('id', 'N/A')}")
                 click.echo(f"   Categories: {struct_data.get('categories', [])}")
+                click.echo(f"   Media Type: {struct_data.get('media_type', 'N/A')}")
                 click.echo(f"   URI: {struct_data.get('uri', 'N/A')}")
+
+                # Show additional fields from original_payload if available
+                if original_data:
+                    click.echo(f"   Description: {original_data.get('desc', 'N/A')}")
+                    click.echo(f"   Directors: {original_data.get('directors', [])}")
+                    click.echo(f"   Language: {original_data.get('primary_language', 'N/A')}")
+                    click.echo(f"   Rating: {original_data.get('age_rating', 'N/A')}")
 
         # Display facets
         if 'facets' in results:

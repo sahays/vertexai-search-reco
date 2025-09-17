@@ -137,31 +137,28 @@ def check_status(operation_name):
     vai_ops = VertexAIOperations()
     vai_ops.check_operation_status(operation_name)
 
-# Search Commands
-@cli.group()
-def search():
-    """Search and recommendation operations"""
-    pass
-
-@search.command('query')
+# Search Command (simplified)
+@cli.command('search')
 @click.argument('query_text')
-@click.option('--filters', help='Search filters (e.g., "categories: ANY(\'action\')")')
+@click.option('--datastore-id', required=True, help='Vertex AI datastore ID')
+@click.option('--engine-id', required=True, help='Search engine ID')
+@click.option('--filters', help='Search filters (e.g., "categories: ANY(\'Drama\')" or "media_type: ANY(\'movie\') AND categories: ANY(\'Action\')")')
 @click.option('--page-size', default=10, help='Number of results to return')
 @click.option('--no-facets', is_flag=True, help='Disable facets in results')
-def search_query(query_text, filters, page_size, no_facets):
-    """Search the media collection"""
-    search_ops = SearchOperations()
-    search_ops.search(query_text, filters=filters, page_size=page_size, facets=not no_facets)
+def search_command(query_text, datastore_id, engine_id, filters, page_size, no_facets):
+    """Semantic search with comprehensive filtering
 
-@search.command('semantic')
-@click.argument('query_text')
-@click.option('--page-size', default=10, help='Number of results to return')
-def semantic_search(query_text, page_size):
-    """Perform semantic search using natural language"""
+    Examples:
+    \b
+    python vais.py search "romantic comedy" --datastore-id media-datastore --engine-id media-search-engine
+    python vais.py search "action movies" --datastore-id media-datastore --engine-id media-search-engine --filters "media_type: ANY('movie')"
+    python vais.py search "hindi drama" --datastore-id media-datastore --engine-id media-search-engine --filters "categories: ANY('Drama') AND primary_language: ANY('hi')"
+    """
     search_ops = SearchOperations()
-    search_ops.semantic_search(query_text, page_size=page_size)
+    search_ops.search(query_text, datastore_id=datastore_id, engine_id=engine_id, filters=filters, page_size=page_size, facets=not no_facets)
 
-@search.command('recommend')
+# Recommendations command (separate from search)
+@cli.command('recommend')
 @click.argument('user_pseudo_id')
 @click.option('--document-id', help='Base document for recommendations')
 @click.option('--page-size', default=10, help='Number of results to return')
@@ -169,27 +166,6 @@ def get_recommendations(user_pseudo_id, document_id, page_size):
     """Get recommendations for a user"""
     search_ops = SearchOperations()
     search_ops.get_recommendations(user_pseudo_id, document_id, page_size)
-
-@search.command('create-synonyms')
-@click.argument('synonyms_json')
-def create_synonyms(synonyms_json):
-    """Create synonyms control (JSON format: [["word1", "word2"], ["word3", "word4"]])"""
-    search_ops = SearchOperations()
-    synonyms = json.loads(synonyms_json)
-    search_ops.create_search_controls("synonyms", synonyms)
-
-@search.command('create-boost')
-@click.argument('filter_expression')
-def create_boost(filter_expression):
-    """Create boost control with filter expression"""
-    search_ops = SearchOperations()
-    search_ops.create_search_controls("boost", filter_expression)
-
-@search.command('list-engines')
-def list_engines():
-    """List all search engines in the project"""
-    search_ops = SearchOperations()
-    search_ops.list_search_engines()
 
 # Data transformation command
 @cli.command('transform-data')
