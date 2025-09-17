@@ -259,9 +259,10 @@ WHERE {id_field} IS NOT NULL
             click.echo(f"❌ Error creating transform view: {e}")
             return False
 
-    def upload_events_csv(self, csv_file):
+    def upload_events_csv(self, csv_file, append=False):
         """Upload user events CSV to BigQuery"""
-        click.echo(f"Uploading events from {csv_file}")
+        mode = "append" if append else "replace"
+        click.echo(f"Uploading events from {csv_file} (mode: {mode})")
 
         self.ensure_dataset_exists()
 
@@ -269,7 +270,7 @@ WHERE {id_field} IS NOT NULL
             source_format=bigquery.SourceFormat.CSV,
             skip_leading_rows=1,
             autodetect=True,
-            write_disposition=bigquery.WriteDisposition.WRITE_TRUNCATE
+            write_disposition=bigquery.WriteDisposition.WRITE_APPEND if append else bigquery.WriteDisposition.WRITE_TRUNCATE
         )
 
         with open(csv_file, "rb") as source_file:
@@ -280,7 +281,63 @@ WHERE {id_field} IS NOT NULL
             )
 
         job.result()
-        click.echo("✅ Events uploaded successfully")
+        click.echo(f"✅ Events uploaded successfully ({mode} mode)")
+
+    def upload_events_csv_to_table(self, csv_file, table_name, append=False):
+        """Upload user events CSV to a specific BigQuery table"""
+        mode = "append" if append else "replace"
+        click.echo(f"Uploading events from {csv_file} to {table_name} (mode: {mode})")
+
+        self.ensure_dataset_exists()
+
+        job_config = bigquery.LoadJobConfig(
+            source_format=bigquery.SourceFormat.CSV,
+            skip_leading_rows=1,
+            autodetect=True,
+            write_disposition=bigquery.WriteDisposition.WRITE_APPEND if append else bigquery.WriteDisposition.WRITE_TRUNCATE
+        )
+
+        with open(csv_file, "rb") as source_file:
+            job = self.client.load_table_from_file(
+                source_file,
+                f"{Config.PROJECT_ID}.{Config.DATASET_ID}.{table_name}",
+                job_config=job_config
+            )
+
+        job.result()
+        click.echo(f"✅ Events uploaded successfully to {table_name} ({mode} mode)")
+
+    def create_events_transform_view_from_table(self, source_table, view_name):
+        """Create events view for Vertex AI format from a specific table"""
+        click.echo(f"Creating user events view {view_name} from table {source_table}")
+
+        sql_query = f"""
+CREATE OR REPLACE VIEW `{Config.PROJECT_ID}.{Config.DATASET_ID}.{view_name}` AS
+SELECT
+  CAST(user_pseudo_id AS STRING) AS userPseudoId,
+  event_type AS eventType,
+  FORMAT_TIMESTAMP("%Y-%m-%dT%H:%M:%SZ", event_timestamp) AS eventTime,
+  [STRUCT(
+    CAST(document_id AS STRING) AS id,
+    CAST(NULL AS INT64) AS quantity
+  )] AS documents,
+  STRUCT(
+    STRUCT([location] AS text) AS location
+  ) AS attributes
+FROM `{Config.PROJECT_ID}.{Config.DATASET_ID}.{source_table}`
+WHERE event_timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 30 DAY)
+"""
+
+        query_job = self.client.query(sql_query)
+        query_job.result()
+        click.echo(f"✅ Events view {view_name} created successfully")
+
+        # Verify the view has data
+        verify_query = f"SELECT COUNT(*) as event_count FROM `{Config.PROJECT_ID}.{Config.DATASET_ID}.{view_name}`"
+        verify_job = self.client.query(verify_query)
+        result = verify_job.result()
+        count = list(result)[0].event_count
+        click.echo(f"📊 Events view contains {count} events")
 
     def create_events_transform_view(self):
         """Create events view for Vertex AI format"""
@@ -292,7 +349,11 @@ SELECT
   CAST(user_pseudo_id AS STRING) AS userPseudoId,
   event_type AS eventType,
   FORMAT_TIMESTAMP("%Y-%m-%dT%H:%M:%SZ", event_timestamp) AS eventTime,
-  [STRUCT(CAST(document_id AS STRING) AS id, CAST(NULL AS STRING) AS name)] AS documents,
+  [STRUCT(
+    CAST(document_id AS STRING) AS id,
+    CAST(NULL AS INT64) AS quantity,
+    CAST(document_id AS STRING) AS document_descriptor
+  )] AS documents,
   STRUCT(
     STRUCT([location] AS text) AS location
   ) AS attributes
@@ -303,3 +364,10 @@ WHERE event_timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 30 DAY)
         query_job = self.client.query(sql_query)
         query_job.result()
         click.echo("✅ Events view created successfully")
+
+        # Verify the view has data
+        verify_query = f"SELECT COUNT(*) as event_count FROM `{Config.PROJECT_ID}.{Config.DATASET_ID}.user_events_view`"
+        verify_job = self.client.query(verify_query)
+        result = verify_job.result()
+        count = list(result)[0].event_count
+        click.echo(f"📊 Events view contains {count} events")

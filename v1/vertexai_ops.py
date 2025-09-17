@@ -106,13 +106,14 @@ class VertexAIOperations:
         """Import user events to datastore"""
         click.echo("Importing user events")
 
-        url = f"https://discoveryengine.googleapis.com/v1alpha/projects/{Config.PROJECT_ID}/locations/global/collections/default_collection/dataStores/{Config.DATASTORE_ID}:importUserEvents"
+        url = f"https://discoveryengine.googleapis.com/v1/projects/{Config.PROJECT_ID}/locations/global/dataStores/{Config.DATASTORE_ID}/userEvents:import"
 
         payload = {
             "bigquerySource": {
                 "projectId": Config.PROJECT_ID,
                 "datasetId": Config.DATASET_ID,
                 "tableId": "user_events_view",
+                "dataSchema": "user_event"
             }
         }
 
@@ -123,6 +124,41 @@ class VertexAIOperations:
             response.raise_for_status()
             click.echo("✅ User events import operation initiated successfully")
             click.echo(json.dumps(response.json(), indent=2))
+            return True
+        except requests.exceptions.HTTPError as e:
+            click.echo(f"❌ HTTP error: {e}")
+            click.echo(f"Response: {e.response.text}")
+            return False
+
+    def import_user_events_from_view(self, view_name):
+        """Import user events from a specific BigQuery view"""
+        click.echo(f"Importing user events from view {view_name}")
+
+        url = f"https://discoveryengine.googleapis.com/v1/projects/{Config.PROJECT_ID}/locations/global/dataStores/{Config.DATASTORE_ID}/userEvents:import"
+
+        payload = {
+            "bigquerySource": {
+                "projectId": Config.PROJECT_ID,
+                "datasetId": Config.DATASET_ID,
+                "tableId": view_name,
+                "dataSchema": "user_event"
+            }
+        }
+
+        try:
+            response = requests.post(
+                url, json=payload, headers=self.headers, timeout=60
+            )
+            response.raise_for_status()
+            click.echo(f"✅ User events import from {view_name} initiated successfully")
+            click.echo(json.dumps(response.json(), indent=2))
+
+            # Extract operation name for status checking
+            operation_name = response.json().get('name', '')
+            if operation_name:
+                click.echo(f"📋 Operation name: {operation_name}")
+                click.echo("💡 Use 'python vais.py check-operation --operation-name <name>' to check status")
+
             return True
         except requests.exceptions.HTTPError as e:
             click.echo(f"❌ HTTP error: {e}")

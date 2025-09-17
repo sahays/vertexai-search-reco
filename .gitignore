@@ -10,6 +10,7 @@ customer_config.json
 customer_schema.json
 *.ipynb
 internal-impl*
+test.json*
 
 *output*
 *logs*

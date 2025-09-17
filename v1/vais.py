@@ -82,10 +82,11 @@ def create_transform_view(raw_table, view_name, id_field, title_field, uri_field
 
 @bigquery.command('upload-events')
 @click.argument('csv_file')
-def upload_events(csv_file):
+@click.option('--append', is_flag=True, help='Append to existing events (default: replace)')
+def upload_events(csv_file, append):
     """Upload user events CSV to BigQuery"""
     bq_ops = BigQueryOperations()
-    bq_ops.upload_events_csv(csv_file)
+    bq_ops.upload_events_csv(csv_file, append=append)
 
 @bigquery.command('create-events-view')
 def create_events_view():
@@ -166,6 +167,92 @@ def get_recommendations(user_pseudo_id, document_id, page_size):
     """Get recommendations for a user"""
     search_ops = SearchOperations()
     search_ops.get_recommendations(user_pseudo_id, document_id, page_size)
+
+# Events pipeline command
+@cli.command('update-events')
+@click.argument('events_csv')
+@click.option('--datastore-id', required=True, help='Vertex AI datastore ID')
+@click.option('--dataset-id', required=True, help='BigQuery dataset ID')
+@click.option('--table-name', required=True, help='BigQuery table name (view will be TABLE_NAME_view)')
+@click.option('--append', is_flag=True, help='Append to existing events (default: replace)')
+def update_events_pipeline(events_csv, datastore_id, dataset_id, table_name, append):
+    """Complete events pipeline: upload CSV, create view, and update datastore
+
+    This command handles the full events workflow:
+    1. Upload events CSV to BigQuery (append or replace mode)
+    2. Create/update the events transform view (TABLE_NAME_view)
+    3. Import events to Vertex AI datastore
+    4. Save logs to outputs directory
+
+    Examples:
+    \b
+    python vais.py --project-id PROJECT update-events events.csv --datastore-id DATASTORE_ID --dataset-id DATASET --table-name user_events
+    python vais.py --project-id PROJECT update-events events.csv --datastore-id DATASTORE_ID --dataset-id DATASET --table-name user_events --append
+    """
+    import os
+    from datetime import datetime
+
+    # Setup logging to outputs directory
+    os.makedirs('outputs', exist_ok=True)
+    log_file = 'outputs/events_pipeline.log'
+
+    def log_and_print(message):
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        log_entry = f"[{timestamp}] {message}"
+        click.echo(log_entry)
+        with open(log_file, 'a', encoding='utf-8') as f:
+            f.write(log_entry + '\n')
+
+    # Clear previous log
+    with open(log_file, 'w') as f:
+        f.write(f"Events Pipeline Log - Started at {datetime.now()}\n")
+        f.write("=" * 50 + "\n")
+
+    try:
+        # Step 1: Upload events CSV
+        mode = "append" if append else "replace"
+        view_name = f"{table_name}_view"
+        log_and_print(f"🔄 Step 1: Uploading events from {events_csv} to {dataset_id}.{table_name} (mode: {mode})")
+
+        # Temporarily update config for this operation
+        original_dataset_id = Config.DATASET_ID
+        original_datastore_id = Config.DATASTORE_ID
+        Config.DATASET_ID = dataset_id
+        Config.DATASTORE_ID = datastore_id
+
+        bq_ops = BigQueryOperations()
+        bq_ops.upload_events_csv_to_table(events_csv, table_name, append=append)
+        log_and_print(f"✅ Step 1 completed: Events uploaded to BigQuery table {dataset_id}.{table_name}")
+
+        # Step 2: Create events transform view
+        log_and_print(f"🔄 Step 2: Creating events transform view {dataset_id}.{view_name}")
+        bq_ops.create_events_transform_view_from_table(table_name, view_name)
+        log_and_print(f"✅ Step 2 completed: Events view {dataset_id}.{view_name} created")
+
+        # Step 3: Import events to datastore
+        log_and_print(f"🔄 Step 3: Importing events from {dataset_id}.{view_name} to datastore {datastore_id}")
+
+        vai_ops = VertexAIOperations()
+        result = vai_ops.import_user_events_from_view(view_name)
+
+        # Restore original config
+        Config.DATASET_ID = original_dataset_id
+        Config.DATASTORE_ID = original_datastore_id
+
+        if result:
+            log_and_print("✅ Step 3 completed: Events import operation initiated")
+            log_and_print("📋 Note: Import is asynchronous - check operation status for completion")
+        else:
+            log_and_print("❌ Step 3 failed: Events import operation failed")
+
+        log_and_print(f"💾 Complete log saved to: {log_file}")
+
+    except Exception as e:
+        log_and_print(f"❌ Pipeline failed with error: {str(e)}")
+        # Restore original config in case of error
+        Config.DATASET_ID = original_dataset_id
+        Config.DATASTORE_ID = original_datastore_id
+        raise
 
 # Data transformation command
 @cli.command('transform-data')
