@@ -234,22 +234,23 @@ class BigQueryOperations:
 
             # Add custom fields using declarative definitions (no schema introspection)
             custom_fields = field_mappings.get("custom_fields", {})
-            for key, field_info in custom_fields.items():
-                source_field_name = field_info.get("name")
-                field_type = field_info.get("type", "string")
+            if isinstance(custom_fields, dict):
+                for key, field_info in custom_fields.items():
+                    source_field_name = field_info.get("name")
+                    field_type = field_info.get("type", "string")
 
-                source_field_sql = escape_field_name(source_field_name)
-                alias = escape_field_name(key, add_alias=False)
+                    source_field_sql = escape_field_name(source_field_name)
+                    alias = escape_field_name(key, add_alias=False)
 
-                if source_field_sql:
-                    if field_type == "array":
-                        # Handle arrays with proper empty string and null handling
-                        transformed_field = safe_array_transform(source_field_sql)
-                        struct_fields.append(f"{transformed_field} AS {alias}")
-                    else:  # Handle string and other types
-                        # Handle strings with proper empty string and null handling
-                        transformed_field = safe_string_transform(source_field_sql)
-                        struct_fields.append(f"{transformed_field} AS {alias}")
+                    if source_field_sql:
+                        if field_type == "array":
+                            # Handle arrays with proper empty string and null handling
+                            transformed_field = safe_array_transform(source_field_sql)
+                            struct_fields.append(f"{transformed_field} AS {alias}")
+                        else:  # Handle string and other types
+                            # Handle strings with proper empty string and null handling
+                            transformed_field = safe_string_transform(source_field_sql)
+                            struct_fields.append(f"{transformed_field} AS {alias}")
 
             if field_mappings.get("include_original_payload", True):
                 struct_fields.append("TO_JSON_STRING(t) AS original_payload")
@@ -407,3 +408,73 @@ WHERE event_timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 30 DAY)
         result = verify_job.result()
         count = list(result)[0].event_count
         click.echo(f"📊 Events view contains {count} events")
+
+def read_rows_from_bq(full_table_id: str):
+    """
+    Reads rows from a BigQuery table and yields them one by one.
+
+    Args:
+        full_table_id: The full BigQuery table name in the format
+            'project.dataset.table'.
+
+    Yields:
+        A dictionary representing a single row from BigQuery.
+    """
+    client = bigquery.Client()
+    query = f"SELECT * FROM `{full_table_id}`"
+    query_job = client.query(query)
+    for row in query_job:
+        yield row
+
+
+def read_rows_from_bq_serializable(full_table_id: str):
+    """
+    Reads rows from a BigQuery table and yields them with Decimal types converted to float
+    for JSON serialization compatibility.
+
+    Args:
+        full_table_id: The full BigQuery table name in the format
+            'project.dataset.table'.
+
+    Yields:
+        A dictionary representing a single row from BigQuery with Decimal types converted.
+    """
+    from decimal import Decimal
+
+    def convert_decimals(obj):
+        """Recursively convert Decimal objects to float for JSON serialization"""
+        if isinstance(obj, Decimal):
+            return float(obj)
+        elif isinstance(obj, dict):
+            return {key: convert_decimals(value) for key, value in obj.items()}
+        elif isinstance(obj, list):
+            return [convert_decimals(item) for item in obj]
+        else:
+            return obj
+
+    def filter_empty_attributes(obj):
+        """Filter out attributes with empty text or numbers arrays"""
+        if isinstance(obj, dict):
+            if 'attributes' in obj and isinstance(obj['attributes'], dict):
+                filtered_attrs = {}
+                for attr_key, attr_value in obj['attributes'].items():
+                    if isinstance(attr_value, dict):
+                        if 'text' in attr_value and isinstance(attr_value['text'], list) and len(attr_value['text']) > 0:
+                            filtered_attrs[attr_key] = attr_value
+                        elif 'numbers' in attr_value and isinstance(attr_value['numbers'], list) and len(attr_value['numbers']) > 0:
+                            filtered_attrs[attr_key] = attr_value
+                obj['attributes'] = filtered_attrs
+            return {key: filter_empty_attributes(value) for key, value in obj.items()}
+        elif isinstance(obj, list):
+            return [filter_empty_attributes(item) for item in obj]
+        else:
+            return obj
+
+    client = bigquery.Client()
+    query = f"SELECT * FROM `{full_table_id}`"
+    query_job = client.query(query)
+    for row in query_job:
+        # Convert row to dict and handle Decimal types
+        row_dict = dict(row)
+        serializable_row = convert_decimals(row_dict)
+        yield serializable_row

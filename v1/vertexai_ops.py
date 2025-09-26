@@ -222,3 +222,70 @@ class VertexAIOperations:
         except requests.exceptions.HTTPError as e:
             click.echo(f"❌ HTTP error: {e}")
             return False
+
+
+def bulk_import_user_events_from_bigquery(project_id: str, location: str, data_store_id: str, bigquery_table: str):
+    """
+    Bulk imports user events directly from BigQuery using the import_user_events API.
+    This is much more efficient than processing events individually.
+
+    Args:
+        project_id: The GCP Project ID.
+        location: The location of the VAIS datastore.
+        data_store_id: The ID of the target VAIS datastore.
+        bigquery_table: Full BigQuery table/view name (project.dataset.table)
+
+    Returns:
+        Operation object for tracking the import progress
+    """
+    from google.cloud.discoveryengine import UserEventServiceClient
+    from google.cloud.discoveryengine_v1beta.types import ImportUserEventsRequest, BigQuerySource
+
+    client = UserEventServiceClient()
+    parent = client.data_store_path(
+        project=project_id, location=location, data_store=data_store_id
+    )
+
+    # Create BigQuery source configuration
+    bigquery_source = BigQuerySource()
+    bigquery_source.project_id = project_id
+    bigquery_source.dataset_id = bigquery_table.split('.')[1]  # Extract dataset from project.dataset.table
+    bigquery_source.table_id = bigquery_table.split('.')[2]    # Extract table from project.dataset.table
+
+    # Create the import request
+    request = ImportUserEventsRequest()
+    request.parent = parent
+    request.bigquery_source = bigquery_source
+
+    # Start the bulk import operation
+    operation = client.import_user_events(request=request)
+
+    click.echo(f"✅ Bulk import operation started")
+    click.echo("📊 This operation runs asynchronously. Monitor progress in the Google Cloud Console.")
+    click.echo(f"🔗 Operation: {operation}")
+
+    return operation
+
+
+def write_user_events(project_id: str, location: str, data_store_id: str, user_events: list[dict]):
+    """
+    Writes a batch of formatted user events to the VAIS API (individual events).
+    Note: For bulk operations, use bulk_import_user_events_from_bigquery() instead.
+
+    Args:
+        project_id: The GCP Project ID.
+        location: The location of the VAIS datastore.
+        data_store_id: The ID of the target VAIS datastore.
+        user_events: A list of user event dictionaries.
+    """
+    from google.cloud.discoveryengine import UserEventServiceClient, UserEvent, WriteUserEventRequest
+
+    client = UserEventServiceClient()
+    parent = client.data_store_path(
+        project=project_id, location=location, data_store=data_store_id
+    )
+
+    for user_event_dict in user_events:
+        user_event = UserEvent.from_json(json.dumps(user_event_dict))
+        request = WriteUserEventRequest(parent=parent, user_event=user_event)
+        client.write_user_event(request=request)
