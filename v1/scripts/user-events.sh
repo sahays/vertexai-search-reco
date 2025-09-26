@@ -24,9 +24,9 @@ fi
 PROJECT_ID="search-and-reco"
 DATASET_ID="media_dataset"
 LOCATION="US" # The location of your BigQuery dataset (e.g., US, EU, asia-south1)
-DATASTORE_ID="media-datastore-1758866993" # The ID of your target VAIS datastore
-SOURCE_TABLE="user_events_ingested" # The raw table uploaded previously
-VIEW_NAME="user_events_for_vais_view" # The view to be created/used for ingestion
+DATASTORE_ID="media-datastore-1758887698" # The ID of your target VAIS datastore
+SOURCE_TABLE="user_events_ingested_v1" # The raw table uploaded previously
+VIEW_NAME="user_events_for_vais_view_v1" # The view to be created/used for ingestion
 
 PYTHON_SCRIPT="$SCRIPT_DIR/../user_event_ops.py"
 TARGET_VIEW_FULL_PATH="$PROJECT_ID:$DATASET_ID.$VIEW_NAME" # Use colon for bq tool

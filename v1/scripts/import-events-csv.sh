@@ -27,7 +27,7 @@ GCS_BUCKET="sahays-zbullet-samples" # IMPORTANT: Bucket to stage the CSV for BQ 
 
 # Paths are now relative to the script's location
 SOURCE_CSV="$SCRIPT_DIR/../sample_data/customer_userevents-sample.csv"
-TABLE_ID="user_events_ingested"
+TABLE_ID="user_events_ingested_v1"
 GCS_URI="gs://$GCS_BUCKET/$(basename "$SOURCE_CSV")"
 
 # --- Schema Definition ---
