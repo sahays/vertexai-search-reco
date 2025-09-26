@@ -25,7 +25,7 @@ PROJECT_ID="search-and-reco"
 DATASET_ID="media_dataset"
 LOCATION="US" # The location of your BigQuery dataset (e.g., US, EU, asia-south1)
 DATASTORE_ID="media-datastore-1758866993" # The ID of your target VAIS datastore
-SOURCE_TABLE="user_events_raw" # The raw table uploaded previously
+SOURCE_TABLE="user_events_ingested" # The raw table uploaded previously
 VIEW_NAME="user_events_for_vais_view" # The view to be created/used for ingestion
 
 PYTHON_SCRIPT="$SCRIPT_DIR/../user_event_ops.py"
@@ -52,8 +52,7 @@ if [ $? -ne 0 ]; then
     # | userInfo.userId                    | ViewerID                  | Direct mapping                                     |
     # | userPseudoId                       | ConvivaSessionID          | Direct mapping (required field)                   |
     # | userInfo.userAgent                 | Browser, BrowserVersion   | Concatenated (e.g., "Chrome/123.0")                |
-    # | documents[0].id                    | asset_id                  | Direct mapping                                     |
-    # | documents[0].uri                   | asset_id                  | Constructed URI (e.g., "https://example.com/...")  |
+    # | documents[0].id                    | show_id                   | Direct mapping (matches zee_id in datastore)      |
     # | attributes.show_title              | c3_cm_showTitle           | Mapped as a text array attribute                   |
     # | attributes.series_name             | c3_cm_seriesName          | Mapped as a text array attribute                   |
     # | attributes.genres                  | c3_cm_genreList           | Mapped as a text array attribute                   |
@@ -91,7 +90,7 @@ if [ $? -ne 0 ]; then
             CONCAT(Browser, '/', BrowserVersion) AS userAgent
         ) AS userInfo,
         [STRUCT(
-            asset_id AS id
+            show_id AS id
         )] AS documents,
 
         -- 3. Curated Attributes: Only include attributes with non-empty values
@@ -178,7 +177,7 @@ if [ $? -ne 0 ]; then
     WHERE
         ViewerID IS NOT NULL
         AND StartTimeUnixMs IS NOT NULL
-        AND asset_id IS NOT NULL;
+        AND show_id IS NOT NULL;
     "
 
     echo "   Executing CREATE VIEW query..."

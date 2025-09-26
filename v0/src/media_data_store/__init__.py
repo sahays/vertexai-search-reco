@@ -1,1 +1,0 @@
-"""Media Data Store module for Vertex AI Search for Media."""

@@ -26,8 +26,8 @@ LOCATION="US" # bq load requires a region like US, EU, etc.
 GCS_BUCKET="sahays-zbullet-samples" # IMPORTANT: Bucket to stage the CSV for BQ load.
 
 # Paths are now relative to the script's location
-SOURCE_CSV="$SCRIPT_DIR/../examples/customer_bquxjob_286c0154_1997b06ebf1.csv"
-TABLE_ID="user_events_raw"
+SOURCE_CSV="$SCRIPT_DIR/../sample_data/customer_userevents-sample.csv"
+TABLE_ID="user_events_ingested"
 GCS_URI="gs://$GCS_BUCKET/$(basename "$SOURCE_CSV")"
 
 # --- Schema Definition ---
